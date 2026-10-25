@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/Flask-3.1-000000?logo=flask&logoColor=white" alt="Flask 3.1">
   <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite 3">
   <img src="https://img.shields.io/badge/pytest-9.1-0A9EDC?logo=pytest&logoColor=white" alt="pytest 9.1">
+  <img src="https://img.shields.io/badge/SymPy-1.14-3B5526?logo=sympy&logoColor=white" alt="SymPy 1.14">
   <br>
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
   <img src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white" alt="Vite 8">
@@ -40,7 +41,10 @@ Instead of handing out answers, it teaches the way a good tutor does:
 - **Reads your homework.** Snap a photo of a worksheet and Clutch turns it into editable text, makes a
   study guide, and keeps the chat focused on that material.
 - **Tracks progress.** Sessions are saved per subject and topic, with a review at the end and a
-  mastery score over time.
+  mastery score over time. Each topic's egg hatches as mastery grows.
+- **Quizzes and badges.** At 80% mastery a topic's quiz unlocks; pass it (4 of 5) to earn that
+  topic's badge. Math answer keys are checked with [SymPy](https://www.sympy.org), so a wrong key
+  from the model gets fixed before a student ever sees it.
 - **Renders real math.** Equations show up properly typeset with KaTeX.
 
 ## How it works
@@ -49,14 +53,15 @@ Instead of handing out answers, it teaches the way a good tutor does:
 React + Vite (frontend)  ──/api──▶  Flask (backend)  ──▶  Ollama running Gemma 4 e2b
      :5173                            :5001                     :11434
                                         │
-                                        ▼
-                                SQLite (chats, topics, progress)
+                                        ├──▶  SQLite (chats, topics, progress, quizzes, badges)
+                                        └──▶  SymPy (checks math quiz answers)
 ```
 
 The tutor's behavior comes from the system prompt in [`backend/app.py`](backend/app.py), and it is
 tested by [`backend/eval_tutor.py`](backend/eval_tutor.py). That script pressures the tutor to give
 away answers, gives it right and wrong attempts and concept questions, and saves every reply to
-`backend/eval_results/` for review.
+`backend/eval_results/` for review. [`backend/eval_quiz.py`](backend/eval_quiz.py) does the same for
+quizzes: it has the model write quizzes and reports how often SymPy had to fix its answer key.
 
 ## Getting started
 
@@ -86,9 +91,12 @@ troubleshooting, are in [`docs/commands.txt`](docs/commands.txt).
 |---|---|
 | [`backend/app.py`](backend/app.py) | Flask API and the tutor's system prompt |
 | [`backend/db.py`](backend/db.py), [`schema.sql`](backend/schema.sql) | SQLite data layer ([docs](docs/database.md)) |
+| [`backend/mathcheck.py`](backend/mathcheck.py) | SymPy checker for math quiz questions |
 | [`backend/eval_tutor.py`](backend/eval_tutor.py) | Behavior tests for the tutor |
-| [`backend/tests/`](backend/tests) | API tests (`pytest`) |
-| [`frontend/src/`](frontend/src) | React app: chat, homework scanner, materials, progress |
+| [`backend/eval_quiz.py`](backend/eval_quiz.py) | Quiz tests against the real model (answer key accuracy) |
+| [`backend/tests/`](backend/tests) | API and math checker tests (`pytest`) |
+| [`frontend/src/`](frontend/src) | React app: chat, homework scanner, materials, progress, quizzes |
+| [`frontend/src/assets/mascot/`](frontend/src/assets/mascot) | Mother Hen art, eggs and badges ([`generate.py`](frontend/src/assets/mascot/generate.py) makes them) |
 | [`docs/`](docs) | Setup commands, database notes, dev log |
 
 ## License
