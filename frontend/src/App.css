@@ -1549,32 +1549,33 @@ button.rec-indicator.done .rec-dot {
   color: white;
 }
 
-/* Event kind colors: exam red, quiz orange, homework blue, other gray; reviews green */
-.kind-chip.exam,
-.legend-dot.exam,
-.cal-pill.exam {
+/* Event kind colors: exam red, quiz orange, homework blue, other gray; reviews green.
+   Prefixed kind-, since .homework, .review and .quiz are page classes elsewhere. */
+.kind-chip.kind-exam,
+.legend-dot.kind-exam,
+.cal-pill.kind-exam {
   background: #dc2626;
 }
 
-.kind-chip.quiz,
-.legend-dot.quiz,
-.cal-pill.quiz {
+.kind-chip.kind-quiz,
+.legend-dot.kind-quiz,
+.cal-pill.kind-quiz {
   background: #ea580c;
 }
 
-.kind-chip.homework,
-.legend-dot.homework,
-.cal-pill.homework {
+.kind-chip.kind-homework,
+.legend-dot.kind-homework,
+.cal-pill.kind-homework {
   background: #2563eb;
 }
 
-.kind-chip.other,
-.legend-dot.other,
-.cal-pill.other {
+.kind-chip.kind-other,
+.legend-dot.kind-other,
+.cal-pill.kind-other {
   background: #6b7280;
 }
 
-.legend-dot.review {
+.legend-dot.kind-review {
   background: #16a34a;
 }
 
