@@ -4,6 +4,7 @@ import './App.css'
 import Chat from './Chat.jsx'
 import Homework from './Homework.jsx'
 import Materials from './Materials.jsx'
+import { Hen, Logo } from './Mascot.jsx'
 import Progress from './Progress.jsx'
 
 const USER_KEY = 'clutch.user'
@@ -101,7 +102,7 @@ export default function App() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          <h1>Clutch</h1>
+          <Logo height={52} />
           <button className="link" onClick={signOut} title="Sign out">
             {user.display_name || user.username} · sign out
           </button>
@@ -194,8 +195,11 @@ function Login({ onSignIn }) {
 
   return (
     <form className="login" onSubmit={submit}>
-      <h1>Clutch</h1>
-      <p className="status">Your study tutor. Enter a username to sign in or get started.</p>
+      <Hen pose="wave" size={160} className="login-hen" />
+      <h1 className="wordmark">Clutch</h1>
+      <p className="status">
+        Mother Hen helps you work things out yourself. Enter a username to sign in or get started.
+      </p>
       <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoFocus />
       <button type="submit">Continue</button>
       {error && <p className="error">{error}</p>}
