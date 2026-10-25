@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "katex": "^0.19.1",
+    "katex": "^0.16.47",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",

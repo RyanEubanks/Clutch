@@ -47,6 +47,11 @@ export default function App() {
   const [quizKey, setQuizKey] = useState(0)
   // Text of the scanned homework; when set, the tutor keeps the chat on this material
   const [homework, setHomework] = useState('')
+  // Title of the saved material being studied, when it came from Materials
+  const [homeworkTitle, setHomeworkTitle] = useState('')
+  // Document to open when switching to Materials; the key remounts it so it opens
+  const [materialId, setMaterialId] = useState(null)
+  const [materialsKey, setMaterialsKey] = useState(0)
   const [error, setError] = useState('')
 
   const refreshSubjects = useCallback(() => {
@@ -76,6 +81,24 @@ export default function App() {
     setConversations([])
     setActiveId(null)
     setHomework('')
+    setHomeworkTitle('')
+  }
+
+  function openMaterial(id) {
+    setMaterialId(id)
+    setView('materials')
+    setMaterialsKey((k) => k + 1)
+  }
+
+  function studyMaterial(doc) {
+    setHomework(doc.content)
+    setHomeworkTitle(doc.title)
+    newChat(doc.topic_id)
+  }
+
+  function updateHomework(text) {
+    setHomework(text)
+    setHomeworkTitle('') // a new or edited scan isn't the saved material any more
   }
 
   function openConversation(id) {
@@ -160,7 +183,8 @@ export default function App() {
             initialTopicId={newChatTopic}
             topics={topics}
             homework={homework}
-            onClearHomework={() => setHomework('')}
+            homeworkTitle={homeworkTitle}
+            onClearHomework={() => updateHomework('')}
             onCreated={(id) => {
               setActiveId(id)
               refreshConversations()
@@ -172,10 +196,26 @@ export default function App() {
         )}
         {view === 'homework' && (
           <div className="page">
-            <Homework homework={homework} setHomework={setHomework} onGetHelp={() => newChat()} />
+            <Homework
+              user={user}
+              topics={topics}
+              homework={homework}
+              setHomework={updateHomework}
+              onGetHelp={() => newChat()}
+              onOpenMaterial={openMaterial}
+            />
           </div>
         )}
-        {view === 'materials' && <Materials user={user} topics={topics} />}
+        {view === 'materials' && (
+          <Materials
+            key={materialsKey}
+            user={user}
+            topics={topics}
+            openId={materialId}
+            onSelect={setMaterialId}
+            onStudy={studyMaterial}
+          />
+        )}
         {view === 'quiz' && quizTopic && (
           <Quiz
             key={quizKey}

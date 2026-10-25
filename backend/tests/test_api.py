@@ -73,6 +73,30 @@ def test_topic_documents_go_into_the_prompt(client, model):
     assert "Lecture 4" in model.calls[-1]["messages"][0]["content"]
 
 
+def test_document_search_and_grouping_fields(client, model):
+    user, _, topic = setup_topic(client)
+    url = f"/api/users/{user['id']}/documents"
+    client.post(url, json={"title": "Lecture 4", "content": "Intro.\nThe chain rule: f'(g(x)) g'(x)",
+                           "topic_id": topic["id"]})
+    client.post(url, json={"title": "Chain rule worksheet", "content": "1. Differentiate sin(5x)"})
+    client.post(url, json={"title": "Limits", "content": "100% of 0/0 forms need work"})
+
+    docs = client.get(url).get_json()
+    assert len(docs) == 3 and all("snippet" not in d and "content" not in d for d in docs)
+    lecture = next(d for d in docs if d["title"] == "Lecture 4")
+    assert lecture["subject_name"] == "Calculus" and lecture["topic_name"] == "Chain rule"
+
+    # Title and content matches, case-insensitive; content hits come with a snippet
+    hits = {d["title"]: d for d in client.get(url, query_string={"q": "CHAIN RULE"}).get_json()}
+    assert set(hits) == {"Lecture 4", "Chain rule worksheet"}
+    assert "chain rule" in hits["Lecture 4"]["snippet"].lower()
+    assert hits["Chain rule worksheet"]["snippet"] is None
+
+    # LIKE wildcards in the query are treated as plain text
+    assert [d["title"] for d in client.get(url, query_string={"q": "100%"}).get_json()] == ["Limits"]
+    assert client.get(url, query_string={"q": "_"}).get_json() == []
+
+
 def test_document_budget_is_respected(client, model, monkeypatch):
     monkeypatch.setattr(app_module, "DOC_CHAR_BUDGET", 50)
     user, _, topic = setup_topic(client)

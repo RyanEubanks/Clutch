@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { api } from './api'
 import Markdown from './Markdown.jsx'
+import { TopicSelect } from './Materials.jsx'
 
 const MAX_SIDE = 1600 // px; big phone photos are shrunk so uploads stay fast
 
@@ -36,11 +38,20 @@ async function post(url, body) {
   return data
 }
 
-export default function Homework({ homework, setHomework, onGetHelp }) {
+// Suggest a title from the first line of the scan, e.g. "Calculus 1 - Homework 4: Derivatives"
+function guessTitle(text) {
+  const first = text.split('\n').find((l) => l.trim()) || ''
+  const title = first.replace(/[#$*_\\]/g, '').trim()
+  return title.length > 3 && title.length <= 80 ? title : `Scanned notes ${new Date().toLocaleDateString()}`
+}
+
+export default function Homework({ user, topics, homework, setHomework, onGetHelp, onOpenMaterial }) {
   const [images, setImages] = useState([])
   const [guide, setGuide] = useState('')
   const [loading, setLoading] = useState('') // what we're waiting on, or ''
   const [error, setError] = useState('')
+  const [saveForm, setSaveForm] = useState(null) // { title, topicId } while saving to Materials
+  const [savedDoc, setSavedDoc] = useState(null)
 
   async function addFiles(e) {
     const files = [...e.target.files]
@@ -70,7 +81,21 @@ export default function Homework({ homework, setHomework, onGetHelp }) {
       const data = await post('/api/homework/read', { images })
       setHomework(data.text)
       setGuide('')
+      setSavedDoc(null)
     })
+
+  const saveToMaterials = (e) => {
+    e.preventDefault()
+    return run('Saving to Materials...', async () => {
+      const doc = await api.createDocument(user.id, {
+        title: saveForm.title,
+        content: homework,
+        topic_id: saveForm.topicId ? Number(saveForm.topicId) : null,
+      })
+      setSavedDoc(doc)
+      setSaveForm(null)
+    })
+  }
 
   const makeGuide = () =>
     run('Writing your study guide...', async () => {
@@ -123,7 +148,45 @@ export default function Homework({ homework, setHomework, onGetHelp }) {
             <button className="secondary" onClick={makeGuide} disabled={!!loading}>
               Make a study guide
             </button>
+            {!saveForm && (
+              <button
+                className="secondary"
+                onClick={() => setSaveForm({ title: guessTitle(homework), topicId: '' })}
+                disabled={!!loading}
+              >
+                Save to Materials
+              </button>
+            )}
           </div>
+          {saveForm && (
+            <form className="save-form" onSubmit={saveToMaterials}>
+              <input
+                value={saveForm.title}
+                onChange={(e) => setSaveForm({ ...saveForm, title: e.target.value })}
+                placeholder="Title"
+                autoFocus
+              />
+              <TopicSelect
+                topics={topics}
+                value={saveForm.topicId}
+                onChange={(topicId) => setSaveForm({ ...saveForm, topicId })}
+              />
+              <button type="submit" disabled={!saveForm.title.trim() || !!loading}>
+                Save
+              </button>
+              <button type="button" className="link" onClick={() => setSaveForm(null)}>
+                cancel
+              </button>
+            </form>
+          )}
+          {savedDoc && (
+            <p className="saved-note">
+              Saved to Materials as "{savedDoc.title}".{' '}
+              <button className="link" onClick={() => onOpenMaterial(savedDoc.id)}>
+                Open it
+              </button>
+            </p>
+          )}
         </section>
       )}
 

@@ -12,6 +12,7 @@ export default function Chat({
   initialTopicId,
   topics,
   homework,
+  homeworkTitle,
   onClearHomework,
   onCreated,
   onChanged,
@@ -120,7 +121,7 @@ export default function Chat({
 
       {homework && (
         <div className="context-bar">
-          Studying your homework
+          {homeworkTitle ? `Studying "${homeworkTitle}"` : 'Studying your homework'}
           <button className="link" onClick={onClearHomework}>Stop using it</button>
         </div>
       )}

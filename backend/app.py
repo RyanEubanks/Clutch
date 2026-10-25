@@ -602,7 +602,8 @@ def create_app(db_path=None):
 
     @app.get("/api/users/<int:user_id>/documents")
     def list_documents(user_id):
-        return jsonify(db.list_documents(get_db(), user_id))
+        """Optional ?q= searches titles and content."""
+        return jsonify(db.list_documents(get_db(), user_id, request.args.get("q")))
 
     @app.post("/api/users/<int:user_id>/documents")
     def create_document(user_id):

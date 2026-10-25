@@ -32,10 +32,14 @@ export const api = {
   endConversation: (id, confidence) =>
     request(`/conversations/${id}/end`, { method: 'POST', body: { confidence } }),
 
-  documents: (userId) => request(`/users/${userId}/documents`),
+  documents: (userId, query = '') =>
+    request(`/users/${userId}/documents${query ? `?q=${encodeURIComponent(query)}` : ''}`),
+  document: (id) => request(`/documents/${id}`),
   createDocument: (userId, doc) =>
     request(`/users/${userId}/documents`, { method: 'POST', body: doc }),
   deleteDocument: (id) => request(`/documents/${id}`, { method: 'DELETE' }),
+  studyGuide: (homework) =>
+    request('/homework/study-guide', { method: 'POST', body: { homework } }),
 
   progress: (userId) => request(`/users/${userId}/progress`),
 
