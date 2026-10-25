@@ -220,6 +220,28 @@ CONTENTS
  3. CAUGHT BY HAND, REVIEW, OR SCREENSHOTS
 ================================================================================
 
+[REVIEW-06] Ryan's Materials and notes code was overwritten, then a stash
+            left a conflict marker in app.py
+  Date:      Oct 25, 2026
+  Found by:  Claude, checking files before writing chat-checking changes
+  Symptom:   backend/app.py in commit f82ac12 contained "<<<<<<< Updated
+             upstream" (a SyntaxError, so Flask couldn't start), and Ryan's
+             Materials search (db.list_documents with a query and snippets)
+             and notes reading (kind: "notes") were missing.
+  Cause:     Claude copied db.py and app.py from its own working copies into
+             the folder (the regrade work, ~1:13 am) without first checking
+             whether they had changed. They had: Ryan's Materials commits had
+             been pulled. Then a git stash pop over the pull left a conflict.
+  Fix:       Three-way merge for every file both sides touched (base f03464f,
+             Ryan's 7e6ce36, Claude's latest). Every line of Ryan's is back;
+             the only lines dropped were Claude's own older lines it had since
+             rewritten. All 65 tests pass, including Ryan's search, notes and
+             lecture tests.
+  Lesson:    Before writing any file into the folder, compare it with the
+             version the change was based on; merge if it changed. Before
+             committing, search for "<<<<<<<" (git diff --check helps).
+  Files:     backend/app.py, backend/db.py, backend/tests/test_api.py
+
 [REVIEW-05] Quiz checker compared answer choices the wrong way
   Date:      Oct 25, 2026
   Found by:  code review before the tests ran
@@ -278,6 +300,25 @@ CONTENTS
 ================================================================================
  4. MODEL MISTAKES CAUGHT
 ================================================================================
+
+[MODEL-06] Tutor said "Not quite" to correct subtraction answers
+  Date:      Oct 25, 2026
+  Found by:  hand testing; then reading the 3 Subtraction sessions in clutch.db
+  Symptom:   "7 - 2 = 5" got "Not quite."; "2-3=-1" (correct) was brushed off as
+             "a statement"; "5-4" (a problem, no answer) got "Not quite."
+  Cause:     The tutor judges answers with its own arithmetic ([OPEN-02]).
+  Fix:       Before each tutor reply, mathcheck.find_claims looks at the
+             student's message: full answers ("7 - 2 = 5", "3 + 4 is 7"), bare
+             answers to the tutor's last question ("= 1", "5", "x = 5"), and
+             problems with no answer ("5-4"). SymPy's verdict is added to the
+             system prompt ("MATH ENGINE CHECK ... is CORRECT"). If the reply
+             still has the wrong verdict ("Not quite." for a right answer, or
+             "Yes" for a wrong one), it asks once more, then falls back to a
+             short reply with the right verdict that doesn't reveal the answer.
+             Applies to saved chats and /api/chat (so eval_tutor.py measures it).
+  Not covered: calculus answers in chat ("Is it e^(x^2) + C?"), word problems.
+  Files:     backend/mathcheck.py (find_claims, check_chat_answer),
+             backend/app.py (tutor_reply, math_facts, verdict)
 
 [MODEL-05] Wrong keys graded right answers as wrong (5 Addition quizzes regraded)
   Date:      Oct 25, 2026
@@ -474,3 +515,6 @@ CONTENTS
                                                         keys fixed
   Oct 25  Regrade script ([MODEL-05])                   53 pass; real database
                                                         regraded, integrity ok
+  Oct 25  Chat answer checking ([MODEL-06]) + restoring 65 pass, including
+          Ryan's overwritten code ([REVIEW-06])         Ryan's search, notes and
+                                                        lecture tests

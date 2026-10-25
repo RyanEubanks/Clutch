@@ -547,3 +547,120 @@ def check_questions(questions, timeout=None, arithmetic=False):
     if timed_out:
         _reset_pool()
     return results
+
+
+# ---------- checking a student's answer in chat ----------
+# Before the tutor replies, find any arithmetic answer the student just gave and
+# compute whether it's right, so the tutor doesn't have to do the math itself.
+
+BARE_ANSWER = re.compile(
+    r"\s*(?:=|is it|it's|it is|its|i got|i get|so it's|so|the answer is|answer:?)?\s*"
+    r"(?:[a-df-z]\s*=\s*)?(-?\d+(?:\.\d+)?(?:\s*/\s*\d+)?)\s*[?.!]*\s*", re.I)
+
+
+def _claim(lhs, rhs):
+    """A dict describing the claim lhs = rhs, or None if either side isn't a number."""
+    left, right = parse(lhs), parse(rhs)
+    if not (left.is_number and right.is_number):
+        return None
+    return {
+        "shown": f"{lhs} = {rhs}",
+        "tex": f"{tex_as_written(lhs)} = {tex_as_written(rhs)}",
+        "problem_tex": tex_as_written(lhs),
+        "correct": same_number(left, right),
+    }
+
+
+def _task_claim(task, answer):
+    """Turn a task found by find_arithmetic plus the student's number into a claim."""
+    kind, text = task
+    if kind == "value":
+        return _claim(text, answer)
+    lhs, rhs = text.replace("?", "b").split("=")
+    solutions = sp.solve(parse(lhs) - parse(rhs), VARS["b"])
+    if len(solutions) != 1:
+        return None
+    shown_problem = text.replace("?", "x")
+    return {
+        "shown": f"{shown_problem}, so x = {answer}",
+        "tex": f"x = {tex_as_written(answer)}",
+        "problem_tex": " = ".join(tex_as_written(s) for s in shown_problem.split("=")),
+        "correct": same_number(parse(answer), solutions[0]),
+    }
+
+
+def find_claims(student, history=()):
+    """Arithmetic answers in the student's latest message, checked.
+
+    Returns {"claims": [...], "posed": problem text or None}. A claim is either written
+    out in full ("7 - 2 = 5", "3 + 4 is 7") or a bare answer ("= 1", "5", "x = 5") to the
+    one arithmetic problem in the tutor's last message (or the student's own last
+    problem). "posed" is set when the student just wrote a problem with no answer ("5-4").
+    """
+    text = _plain_math(student)
+    # "3 + 4 is 7" / "equals 7" -> "3 + 4 = 7"
+    text = re.sub(r"(\d\)?)\s+(?:equals|is equal to|is|makes|gives)\s+(?=-?\d)", r"\1 = ", text, flags=re.I)
+    claims = []
+    for eq in EQUATION.finditer(text):
+        lhs, rhs = (side.strip().strip(".;:!").strip() for side in eq.groups())
+        if not lhs or not rhs or "?" in lhs + rhs or re.search(r"[a-z]", lhs + rhs):
+            continue
+        if not re.search(r"[+\-*/^]", lhs.lstrip("-")) and not re.search(r"[+\-*/^]", rhs.lstrip("-")):
+            continue  # "5 = 5": nothing to compute
+        if re.search(r"[+\-*/^]", rhs.lstrip("-")) and not re.search(r"[+\-*/^]", lhs.lstrip("-")):
+            lhs, rhs = rhs, lhs  # "5 = 7 - 2"
+        try:
+            claim = _claim(lhs, rhs)
+        except MathError:
+            continue
+        if claim:
+            claims.append(claim)
+    if claims:
+        return {"claims": claims, "posed": None}
+
+    bare = BARE_ANSWER.fullmatch(str(student))
+    if bare:
+        answer = bare.group(1).replace(" ", "")
+        earlier = [m for m in reversed(list(history)) if m.get("role") == "assistant"][:1]
+        earlier += [m for m in reversed(list(history)) if m.get("role") == "user"]
+        for message in earlier:
+            task = find_arithmetic(message.get("content") or "")
+            if task:
+                try:
+                    claim = _task_claim(task, answer)
+                except MathError:
+                    claim = None
+                if claim:
+                    return {"claims": [claim], "posed": None}
+                break
+        return {"claims": [], "posed": None}
+
+    # A problem with no answer ("5-4", "what is 12 + 7?"): the student wants help with it.
+    words = re.sub(r"[\d\s.()+\-*/^?=]", " ", text).split()
+    task = find_arithmetic(text)
+    if task and task[0] == "value" and "=" not in text and len(words) <= 4:
+        return {"claims": [], "posed": task[1]}
+    return {"claims": [], "posed": None}
+
+
+def _claims_safely(args):
+    try:
+        return find_claims(*args), None
+    except Exception as exc:  # never let checking break the chat
+        return {"claims": [], "posed": None}, f"{type(exc).__name__}: {exc}"
+
+
+def check_chat_answer(student, history=(), timeout=None):
+    """find_claims in a worker process with a time limit. Never raises."""
+    timeout = CHECK_TIMEOUT if timeout is None else timeout
+    pool = _get_pool()
+    history = [{"role": m.get("role"), "content": m.get("content")} for m in history][-6:]
+    future = pool.submit(_claims_safely, (student, history))
+    try:
+        result, _error = future.result(timeout=timeout)
+        return result
+    except FutureTimeout:
+        _reset_pool()
+    except Exception:
+        pass
+    return {"claims": [], "posed": None}

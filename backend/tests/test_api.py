@@ -73,6 +73,30 @@ def test_topic_documents_go_into_the_prompt(client, model):
     assert "Lecture 4" in model.calls[-1]["messages"][0]["content"]
 
 
+def test_document_search_and_grouping_fields(client, model):
+    user, _, topic = setup_topic(client)
+    url = f"/api/users/{user['id']}/documents"
+    client.post(url, json={"title": "Lecture 4", "content": "Intro.\nThe chain rule: f'(g(x)) g'(x)",
+                           "topic_id": topic["id"]})
+    client.post(url, json={"title": "Chain rule worksheet", "content": "1. Differentiate sin(5x)"})
+    client.post(url, json={"title": "Limits", "content": "100% of 0/0 forms need work"})
+
+    docs = client.get(url).get_json()
+    assert len(docs) == 3 and all("snippet" not in d and "content" not in d for d in docs)
+    lecture = next(d for d in docs if d["title"] == "Lecture 4")
+    assert lecture["subject_name"] == "Calculus" and lecture["topic_name"] == "Chain rule"
+
+    # Title and content matches, case-insensitive; content hits come with a snippet
+    hits = {d["title"]: d for d in client.get(url, query_string={"q": "CHAIN RULE"}).get_json()}
+    assert set(hits) == {"Lecture 4", "Chain rule worksheet"}
+    assert "chain rule" in hits["Lecture 4"]["snippet"].lower()
+    assert hits["Chain rule worksheet"]["snippet"] is None
+
+    # LIKE wildcards in the query are treated as plain text
+    assert [d["title"] for d in client.get(url, query_string={"q": "100%"}).get_json()] == ["Limits"]
+    assert client.get(url, query_string={"q": "_"}).get_json() == []
+
+
 def test_document_budget_is_respected(client, model, monkeypatch):
     monkeypatch.setattr(app_module, "DOC_CHAR_BUDGET", 50)
     user, _, topic = setup_topic(client)
@@ -458,3 +482,95 @@ def test_checked_questions_first_unchecked_numbers_last(client, model):
 
 def test_health_reports_math_checker(client):
     assert client.get("/api/health").get_json()["math_checker"] is True
+
+
+# ---------- checking student answers in chat ----------
+
+class ScriptedModel:
+    """Returns the given replies in order (the last one repeats), and records prompts."""
+
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), []
+
+    def __call__(self, messages, temperature=0.2, json_mode=False):
+        self.calls.append(messages)
+        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+
+
+def chat(client, monkeypatch, model, *student_messages):
+    monkeypatch.setattr(app_module, "ask_model", model)
+    user = client.post("/api/users", json={"username": "kris"}).get_json()
+    convo = client.post(f"/api/users/{user['id']}/conversations", json={}).get_json()
+    out = None
+    for text in student_messages:
+        out = client.post(f"/api/conversations/{convo['id']}/messages", json={"content": text}).get_json()
+    return out
+
+
+def test_correct_answer_marked_wrong_gets_fixed(client, monkeypatch):
+    # Real session: the tutor answered "7 - 2 = 5" with "Not quite."
+    model = ScriptedModel("Not quite. Let's look closely at $7 - 2$.")
+    out = chat(client, monkeypatch, model, "7 - 2 = 5")
+    assert "7 - 2 = 5 is CORRECT" in model.calls[0][0]["content"]
+    assert len(model.calls) == 2  # one retry
+    assert "math engine checked this" in model.calls[1][-1]["content"]
+    reply = out["assistant_message"]["content"]
+    assert reply.startswith("Yes, that's right: $7 - 2 = 5$")  # fallback after the retry also failed
+    assert out["math_check"][0]["correct"] is True
+
+
+def test_retry_reply_is_used_when_it_gets_the_verdict_right(client, monkeypatch):
+    model = ScriptedModel("Not quite.", "Yes, that's right. 2 - 3 is -1 because you go below zero.")
+    out = chat(client, monkeypatch, model, "2-3=-1")
+    assert out["assistant_message"]["content"].startswith("Yes, that's right. 2 - 3 is -1")
+
+
+def test_right_verdict_needs_no_retry(client, monkeypatch):
+    model = ScriptedModel("Yes, that's right. Subtracting 4 from 7 leaves 3.")
+    chat(client, monkeypatch, model, "7-4=3")
+    assert len(model.calls) == 1
+
+
+def test_wrong_answer_confirmed_by_tutor_gets_fixed_without_leaking(client, monkeypatch):
+    model = ScriptedModel("Yes, that's right!")
+    out = chat(client, monkeypatch, model, "7 - 2 = 6")
+    assert "7 - 2 = 6 is WRONG" in model.calls[0][0]["content"]
+    reply = out["assistant_message"]["content"]
+    assert reply.startswith("Not quite.") and "5" not in reply
+
+
+def test_bare_answer_is_checked_against_the_tutors_question(client, monkeypatch):
+    # Real session: "5-4", then the tutor asked about it, then the student said "= 1".
+    model = ScriptedModel(
+        "What happens when you take away 4 from 5?",
+        "Not quite.",  # wrong verdict for "= 1"
+        "Yes, that's right. 5 take away 4 leaves 1.",
+    )
+    out = chat(client, monkeypatch, model, "5-4", "= 1")
+    assert "wrote the problem 5-4 without an answer" in model.calls[0][0]["content"]
+    assert "5-4 = 1 is CORRECT" in model.calls[1][0]["content"]
+    assert out["assistant_message"]["content"].startswith("Yes, that's right. 5 take away 4")
+
+
+def test_non_math_messages_get_no_math_check(client, monkeypatch):
+    model = ScriptedModel("Subtraction means taking away. What do you think 5 - 2 is?")
+    out = chat(client, monkeypatch, model, "Losing value")
+    assert "MATH ENGINE CHECK" not in model.calls[0][0]["content"]
+    assert out["math_check"] == [] and len(model.calls) == 1
+
+
+def test_stateless_chat_checks_answers_too(client, monkeypatch):
+    model = ScriptedModel("Not quite.")
+    monkeypatch.setattr(app_module, "ask_model", model)
+    r = client.post("/api/chat", json={"messages": [
+        {"role": "user", "content": "How do I find the limit of (x^2 - 9)/(x - 3) as x approaches 3?"},
+        {"role": "assistant", "content": "Try factoring the top."},
+        {"role": "user", "content": "I got 6 = 3 + 3"},
+    ]}).get_json()
+    assert r["reply"].startswith("Yes, that's right")
+
+
+def test_verdict_detection():
+    assert app_module.verdict("Yes, that's right.") is True
+    assert app_module.verdict("  Not quite. Look again.") is False
+    assert app_module.verdict("What do you think?") is None

@@ -104,7 +104,6 @@ READ_PROMPT = """Transcribe the homework problems in this image exactly as writt
 - Do not solve anything or add comments.
 - If part of the page is unreadable, write [unclear] there."""
 
-<<<<<<< Updated upstream
 NOTES_READ_PROMPT = """Transcribe the notes in this image exactly as written, in Markdown.
 - Keep the structure: titles and section names as headings (# or ##), lists as bullet points, \
 numbered steps and problems as numbered lists.
@@ -162,8 +161,6 @@ def split_transcript(text, max_chars):
             current = f"{current}\n\n{piece}" if current else piece
     return parts + [current] if current else parts
 
-=======
->>>>>>> Stashed changes
 STUDY_GUIDE_PROMPT = """Make a study guide for the material in this homework. Use Markdown \
 with these sections:
 
@@ -254,6 +251,85 @@ def ask_model(messages, temperature=0.2, json_mode=False):
         model=MODEL, messages=messages, temperature=temperature, **kwargs
     )
     return resp.choices[0].message.content
+
+
+def math_facts(check):
+    """Extra system-prompt lines with the math engine's verdict on the student's answer."""
+    lines = []
+    for c in check["claims"]:
+        if c["correct"]:
+            lines.append(f"- The student's answer {c['shown']} is CORRECT.")
+        else:
+            lines.append(f"- The student's answer {c['shown']} is WRONG. "
+                         f"Do not tell them the correct value.")
+    if check.get("posed"):
+        lines.append(f"- The student wrote the problem {check['posed']} without an answer. "
+                     f"They want help with it: treat it as WORKING ON A PROBLEM, and do not "
+                     f"say \"Not quite.\"")
+    if not lines:
+        return ""
+    return ("\n\nMATH ENGINE CHECK. This was computed exactly by a calculator. Trust it over your "
+            "own arithmetic and never contradict it:\n" + "\n".join(lines) +
+            "\nFollow your rules for answers: if an answer is correct, start your reply with "
+            "\"Yes, that's right.\" If it is wrong, start with \"Not quite.\"")
+
+
+def verdict(reply):
+    """True if the reply confirms the answer, False if it rejects it, None if neither."""
+    start = (reply or "").strip().lower()
+    if start.startswith(("yes", "correct", "that's right", "that is right", "exactly", "right")):
+        return True
+    if start.startswith(("not quite", "no,", "no.", "not exactly", "incorrect", "that's not")):
+        return False
+    return None
+
+
+def tutor_reply(system, history):
+    """Ask the tutor for its next reply, with the student's math answer checked first.
+
+    history ends with the student's newest message. If the student gave exactly one
+    answer and the tutor's verdict contradicts the math engine, ask once more; if it is
+    still wrong, send a short reply with the right verdict instead.
+    Returns (reply, check).
+    """
+    student = history[-1]["content"] if history and history[-1].get("role") == "user" else ""
+    check = (mathcheck.check_chat_answer(student, history[:-1])
+             if (mathcheck and student) else {"claims": [], "posed": None})
+    facts = math_facts(check)
+    messages = [{"role": "system", "content": system + facts}, *history]
+    reply = ask_model(messages)
+
+    if len(check["claims"]) != 1:
+        return reply, check
+    claim = check["claims"][0]
+
+    def contradicts(text):
+        v = verdict(text)
+        return v is False if claim["correct"] else v is True
+
+    def unconfirmed(text):
+        return claim["correct"] and verdict(text) is not True
+
+    if contradicts(reply) or unconfirmed(reply):
+        if claim["correct"]:
+            fix = ('the answer {} is CORRECT. Rewrite your reply so it starts with '
+                   '"Yes, that\'s right."').format(claim["shown"])
+        else:
+            fix = ('the answer {} is WRONG. Rewrite your reply so it starts with '
+                   '"Not quite." and do not reveal the correct value.').format(claim["shown"])
+        retry = messages + [
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": f"(Note from the app, not the student: the math engine checked this: {fix})"},
+        ]
+        reply = ask_model(retry)
+        if contradicts(reply) or unconfirmed(reply):
+            if claim["correct"]:
+                reply = (f"Yes, that's right: ${claim['tex']}$. Nice work! "
+                         f"Want to try another one?")
+            else:
+                reply = (f"Not quite. Take another look at ${claim['problem_tex']}$ and work it "
+                         f"out step by step. What do you get?")
+    return reply, check
 
 
 def with_homework(system, homework):
@@ -493,7 +569,7 @@ def create_app(db_path=None):
             return jsonify(error="messages is required"), 400
         system = with_homework(SYSTEM_PROMPT, data.get("homework"))
         try:
-            reply = ask_model([{"role": "system", "content": system}, *messages])
+            reply, _check = tutor_reply(system, messages)
         except Exception as exc:
             return jsonify(error=f"Model request failed: {exc}"), 502
         return jsonify(reply=reply)
@@ -502,10 +578,16 @@ def create_app(db_path=None):
 
     @app.post("/api/homework/read")
     def read_homework():
-        """Turn photos of homework (base64 data URLs) into text the student can check and edit."""
+        """Turn photos of homework or notes (base64 data URLs) into text the student can edit.
+
+        Body: {"images": [...], "kind": "homework" | "notes"}  (kind defaults to homework)
+        """
         images = body().get("images", [])
         if not images:
             return jsonify(error="images is required"), 400
+        prompt = READ_PROMPTS.get(body().get("kind") or "homework")
+        if not prompt:
+            return jsonify(error="kind must be homework or notes"), 400
 
         pages = []
         try:
@@ -516,7 +598,7 @@ def create_app(db_path=None):
                         "role": "user",
                         "content": [
                             {"type": "image_url", "image_url": {"url": image}},
-                            {"type": "text", "text": READ_PROMPT},
+                            {"type": "text", "text": prompt},
                         ],
                     }],
                     temperature=0,
@@ -700,7 +782,7 @@ def create_app(db_path=None):
         ]
         try:
             system = build_system_prompt(conn, convo, body().get("homework"))
-            reply = ask_model([{"role": "system", "content": system}, *history])
+            reply, check = tutor_reply(system, history)
         except Exception as exc:
             db.delete_message(conn, user_msg["id"])  # so a retry doesn't duplicate it
             return jsonify(error=f"Model request failed: {exc}"), 502
@@ -710,6 +792,7 @@ def create_app(db_path=None):
             user_message=user_msg,
             assistant_message=assistant_msg,
             conversation=db.get_conversation(conn, conversation_id),
+            math_check=check["claims"],  # what the math engine found in the student's message
         )
 
     @app.post("/api/conversations/<int:conversation_id>/end")
@@ -765,7 +848,8 @@ def create_app(db_path=None):
 
     @app.get("/api/users/<int:user_id>/documents")
     def list_documents(user_id):
-        return jsonify(db.list_documents(get_db(), user_id))
+        """Optional ?q= searches titles and content."""
+        return jsonify(db.list_documents(get_db(), user_id, request.args.get("q")))
 
     @app.post("/api/users/<int:user_id>/documents")
     def create_document(user_id):
