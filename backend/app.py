@@ -18,11 +18,82 @@ client = OpenAI(base_url=os.getenv("MODEL_BASE_URL"), api_key="local")
 # so cap how much study material goes into each prompt. Raise this once num_ctx is raised.
 DOC_CHAR_BUDGET = int(os.getenv("DOC_CHAR_BUDGET", "6000"))
 
-SYSTEM_PROMPT = (
-    "You are a Socratic tutor. Help the student learn; do not give the final "
-    "answer or a full worked solution, even if asked. Ask one short guiding "
-    "question at a time, or give a small hint."
-)
+#
+#SYSTEM_PROMPT = (
+#    "You are a Socratic tutor. Help the student learn; do not give the final "
+#    "answer or a full worked solution, even if asked. Ask one short guiding "
+#    "question at a time, or give a small hint."
+#)
+
+SYSTEM_PROMPT = ("""You are a Socratic tutor. Help the student learn; do not solve the \
+problem for them.
+
+Before the student has reached the answer:
+- Do not give the final answer or a full worked solution, even if asked.
+- Ask one short guiding question at a time, or give one small hint.
+
+When the student gives an answer:
+- First work the problem out yourself, step by step, and get the correct answer. Then compare \
+it with the student's answer. Never say an answer is correct unless it matches the answer you \
+worked out. Equivalent forms count as correct (for example 6x(x^2+1)^2 and 3(x^2+1)^2 * 2x, \
+or e^(x^2) + C written as e^{x^2} + C).
+- If it is correct: start your reply with "Yes, that's right." Explain in one or two \
+sentences why it works. Do not give any more hints or steps for that problem. Then ask one \
+question that deepens understanding, or offer a similar practice problem.
+- If it is wrong: start your reply with "Not quite." Do not reveal the correct answer. Point \
+to the step where the reasoning went off, with one small hint.
+
+Watch for answers that sound reasonable but are wrong. For example, getting 0/0 when you plug \
+a number into a limit does NOT mean the limit is 0; 0/0 means the expression must be \
+simplified first. A student who says "the limit is 0 because I got 0/0" is wrong.
+
+Hints are only for a student who has not reached the answer yet. Once they have it, \
+confirm it.
+
+Write math in LaTeX: $...$ for math inside a sentence and $$...$$ for math on its own line.
+""")
+
+HOMEWORK_CONTEXT = """
+
+The student uploaded this homework and is working on it:
+<homework>
+{homework}
+</homework>
+
+Keep the conversation on this material. If the student asks about something unrelated, \
+gently bring them back to the homework. The rules above apply to every homework problem: \
+do not give their final answers or full solutions."""
+
+READ_PROMPT = """Transcribe the homework problems in this image exactly as written.
+- Number each problem the way the page does (or 1, 2, 3... if it has no numbers).
+- Write math in LaTeX: $...$ inside a sentence, $$...$$ on its own line.
+- Include instructions such as "Show your work" or "Round to two decimals".
+- Do not solve anything or add comments.
+- If part of the page is unreadable, write [unclear] there."""
+
+STUDY_GUIDE_PROMPT = """Make a study guide for the material in this homework. Use Markdown \
+with these sections:
+
+## Topics
+The topics the homework covers, as a short list.
+
+## Key ideas
+A short, plain explanation of each idea the student needs.
+
+## Formulas
+The formulas and rules they will use, in LaTeX.
+
+## Worked example
+Solve ONE new problem that is similar to the homework but not one of its problems, step by step.
+
+## Practice problems
+Three new problems like the homework, then their final answers under "Answers".
+
+Do not solve the homework problems themselves. Write math in LaTeX: $...$ inside a sentence \
+and $$...$$ on its own line.
+
+Homework:
+{homework}"""
 
 REVIEW_PROMPT = (
     "You are reviewing a tutoring session. Judge how well the STUDENT understood the "
@@ -34,18 +105,25 @@ REVIEW_PROMPT = (
 )
 
 
-def complete(messages, json_mode=False):
+def ask_model(messages, temperature=0.2, json_mode=False):
     """Send messages to the model and return the reply text."""
     kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
-    resp = client.chat.completions.create(model=MODEL, messages=messages, **kwargs)
+    resp = client.chat.completions.create(
+        model=MODEL, messages=messages, temperature=temperature, **kwargs
+    )
     return resp.choices[0].message.content
 
 
-def build_system_prompt(conn, convo):
-    """The base tutor prompt, plus what we know about this topic and student."""
-    parts = [SYSTEM_PROMPT]
+def with_homework(system, homework):
+    homework = (homework or "").strip()
+    return system + HOMEWORK_CONTEXT.format(homework=homework) if homework else system
+
+
+def build_system_prompt(conn, convo, homework=None):
+    """The base tutor prompt, plus homework, topic, progress and study material."""
+    parts = [with_homework(SYSTEM_PROMPT, homework)]
     if convo["topic_id"] is None:
-        return SYSTEM_PROMPT
+        return parts[0]
     topic = db.get_topic(conn, convo["topic_id"])
     parts.append(f"\nThe student is studying: {topic['subject_name']} / {topic['name']}.")
     if topic["description"]:
@@ -140,15 +218,58 @@ def create_app(db_path=None):
 
     @app.post("/api/chat")
     def chat():
-        """Stateless chat (nothing saved). Kept for eval_tutor.py and chat_cli.py."""
-        messages = body().get("messages", [])
+        """Stateless chat (nothing saved). Used by eval_tutor.py and chat_cli.py."""
+        data = body()
+        messages = data.get("messages", [])
         if not messages:
             return jsonify(error="messages is required"), 400
+        system = with_homework(SYSTEM_PROMPT, data.get("homework"))
         try:
-            reply = complete([{"role": "system", "content": SYSTEM_PROMPT}, *messages])
+            reply = ask_model([{"role": "system", "content": system}, *messages])
         except Exception as exc:
             return jsonify(error=f"Model request failed: {exc}"), 502
         return jsonify(reply=reply)
+
+    # ---------- homework scanning ----------
+
+    @app.post("/api/homework/read")
+    def read_homework():
+        """Turn photos of homework (base64 data URLs) into text the student can check and edit."""
+        images = body().get("images", [])
+        if not images:
+            return jsonify(error="images is required"), 400
+
+        pages = []
+        try:
+            # One request per page keeps each image's prompt small for the e2b model
+            for image in images:
+                pages.append(ask_model(
+                    [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": image}},
+                            {"type": "text", "text": READ_PROMPT},
+                        ],
+                    }],
+                    temperature=0,
+                ))
+        except Exception as exc:
+            return jsonify(error=f"Model request failed: {exc}"), 502
+
+        return jsonify(text="\n\n".join(pages))
+
+    @app.post("/api/homework/study-guide")
+    def study_guide():
+        homework = (body().get("homework") or "").strip()
+        if not homework:
+            return jsonify(error="homework is required"), 400
+
+        try:
+            guide = ask_model([{"role": "user", "content": STUDY_GUIDE_PROMPT.format(homework=homework)}])
+        except Exception as exc:
+            return jsonify(error=f"Model request failed: {exc}"), 502
+
+        return jsonify(guide=guide)
 
     # ---------- users ----------
 
@@ -234,7 +355,10 @@ def create_app(db_path=None):
 
     @app.post("/api/conversations/<int:conversation_id>/messages")
     def send_message(conversation_id):
-        """Save the student's message, ask the tutor, save and return the reply."""
+        """Save the student's message, ask the tutor, save and return the reply.
+
+        Body: {"content": "...", "homework": "..."}  (homework text is optional)
+        """
         conn = get_db()
         convo = db.get_conversation(conn, conversation_id)
         if not convo:
@@ -249,7 +373,8 @@ def create_app(db_path=None):
             for m in db.get_messages(conn, conversation_id)
         ]
         try:
-            reply = complete([{"role": "system", "content": build_system_prompt(conn, convo)}, *history])
+            system = build_system_prompt(conn, convo, body().get("homework"))
+            reply = ask_model([{"role": "system", "content": system}, *history])
         except Exception as exc:
             db.delete_message(conn, user_msg["id"])  # so a retry doesn't duplicate it
             return jsonify(error=f"Model request failed: {exc}"), 502
@@ -286,9 +411,10 @@ def create_app(db_path=None):
 
         transcript = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
         try:
-            raw = complete(
+            raw = ask_model(
                 [{"role": "system", "content": REVIEW_PROMPT},
                  {"role": "user", "content": transcript}],
+                temperature=0,
                 json_mode=True,
             )
             review = parse_review(raw)

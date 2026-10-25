@@ -165,3 +165,28 @@ def test_session_score():
     assert db.session_score(None, None) is None
     assert db.session_score(0.5, None) == 0.5
     assert db.session_score(None, 1) == 0.0
+
+
+def test_homework_reaches_saved_chat_prompt(client, model):
+    user, _, topic = setup_topic(client)
+    convo = client.post(f"/api/users/{user['id']}/conversations", json={"topic_id": topic["id"]}).get_json()
+    client.post(f"/api/conversations/{convo['id']}/messages",
+                json={"content": "help with 1", "homework": "1. Differentiate $x^3$"})
+    system = model.calls[-1]["messages"][0]["content"]
+    assert "<homework>\n1. Differentiate $x^3$\n</homework>" in system
+    assert "Calculus / Chain rule" in system
+
+
+def test_stateless_chat_with_homework(client, model):
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "homework": "2. Integrate x"})
+    assert "2. Integrate x" in model.calls[-1]["messages"][0]["content"]
+
+
+def test_homework_read_and_study_guide(client, model):
+    model.reply = "1. $x^2$"
+    r = client.post("/api/homework/read", json={"images": ["data:image/jpeg;base64,AAA", "data:image/jpeg;base64,BBB"]})
+    assert r.get_json()["text"] == "1. $x^2$\n\n1. $x^2$"
+    assert model.calls[-1]["temperature"] == 0
+    assert client.post("/api/homework/read", json={}).status_code == 400
+    g = client.post("/api/homework/study-guide", json={"homework": "1. $x^2$"})
+    assert g.get_json()["guide"] == "1. $x^2$"

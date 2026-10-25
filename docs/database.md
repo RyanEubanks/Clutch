@@ -36,11 +36,12 @@ characters (default 6000) because of Ollama's small default context window (see 
 - `GET|POST /api/users/<uid>/subjects`, `DELETE /api/subjects/<id>`
 - `POST /api/subjects/<id>/topics`, `DELETE /api/topics/<id>`
 - `GET|POST /api/users/<uid>/conversations`, `GET|DELETE /api/conversations/<id>`
-- `POST /api/conversations/<id>/messages` `{content}` - saves both turns
+- `POST /api/conversations/<id>/messages` `{content, homework?}` - saves both turns; scanned homework text is added to the prompt like in `/api/chat`
 - `POST /api/conversations/<id>/end` `{confidence?}` - review + progress update
 - `GET|POST /api/users/<uid>/documents`, `GET|DELETE /api/documents/<id>`
 - `GET /api/users/<uid>/progress`
-- `POST /api/chat` - old stateless endpoint, still used by eval_tutor.py and chat_cli.py
+- `POST /api/chat` `{messages, homework?}` - stateless (nothing saved), used by eval_tutor.py and chat_cli.py
+- `POST /api/homework/read` `{images}`, `POST /api/homework/study-guide` `{homework}` - homework scanning (not stored)
 
 ## Changing the schema later
 
@@ -50,3 +51,9 @@ Add the change to `schema.sql` for fresh databases, bump `SCHEMA_VERSION` in `db
 ## Tests
 
 `cd backend && python -m pytest tests` (uses a fake model, no Ollama needed).
+
+## Frontend files
+
+`App.jsx` (sign-in, sidebar, tabs), `Chat.jsx` (saved study sessions + end-of-session review),
+`Homework.jsx` (scan homework), `Materials.jsx`, `Progress.jsx`, `Meter.jsx`, `Markdown.jsx`, `api.js`.
+Homework text is still kept in the browser only; saving it to the database is a possible next step.

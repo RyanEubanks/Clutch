@@ -27,8 +27,8 @@ export const api = {
     request(`/users/${userId}/conversations`, { method: 'POST', body: { topic_id: topicId } }),
   conversation: (id) => request(`/conversations/${id}`),
   deleteConversation: (id) => request(`/conversations/${id}`, { method: 'DELETE' }),
-  sendMessage: (id, content) =>
-    request(`/conversations/${id}/messages`, { method: 'POST', body: { content } }),
+  sendMessage: (id, content, homework) =>
+    request(`/conversations/${id}/messages`, { method: 'POST', body: { content, homework } }),
   endConversation: (id, confidence) =>
     request(`/conversations/${id}/end`, { method: 'POST', body: { confidence } }),
 

@@ -21,8 +21,8 @@ class FakeModel:
         self.review = '{"understanding": 0.8, "summary": "Chain rule", "strengths": "Set up u", "gaps": "Forgot the inner derivative"}'
         self.fail = False
 
-    def __call__(self, messages, json_mode=False):
-        self.calls.append({"messages": messages, "json_mode": json_mode})
+    def __call__(self, messages, temperature=0.2, json_mode=False):
+        self.calls.append({"messages": messages, "json_mode": json_mode, "temperature": temperature})
         if self.fail:
             raise RuntimeError("model offline")
         return self.review if json_mode else self.reply
@@ -31,7 +31,7 @@ class FakeModel:
 @pytest.fixture
 def model(monkeypatch):
     fake = FakeModel()
-    monkeypatch.setattr(app_module, "complete", fake)
+    monkeypatch.setattr(app_module, "ask_model", fake)
     return fake
 
 

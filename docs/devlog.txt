@@ -4,3 +4,5 @@ One guide warns that Ollama defaults Gemma 4 to a 4K context window,
  for short chats, so ignore it for now. It will matter 
  when you start putting whole notes or textbook chapters into the prompt, 
  because the model might otherwise cut off the end without telling you.
+
+
