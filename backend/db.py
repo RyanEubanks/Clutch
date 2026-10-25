@@ -11,7 +11,9 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = BACKEND_DIR / "schema.sql"
 DEFAULT_DB_PATH = BACKEND_DIR / "user_data" / "clutch.db"
-SCHEMA_VERSION = 4  # 2: quizzes + badges, 3: events (new tables), 4: subjects.catalog_id
+# 2: quizzes + badges, 3: events (new tables), 4: subjects.catalog_id on one branch and
+# users.password_hash + is_demo on another, 5: users.recovery_hash, 6: both branches merged
+SCHEMA_VERSION = 6
 
 # How much a new session review moves topic mastery (0-1). Higher = reacts faster.
 MASTERY_WEIGHT = 0.4
@@ -36,9 +38,18 @@ def init_db(conn):
     conn.executescript(SCHEMA_PATH.read_text())
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     # Migrations for changes schema.sql can't apply on its own (e.g. new columns).
-    # Each checks first, because a brand-new database already has the column.
-    if version < 4 and "catalog_id" not in _columns(conn, "subjects"):
-        conn.execute("ALTER TABLE subjects ADD COLUMN catalog_id TEXT")
+    # Each checks first, because a brand-new database already has the column. Two branches
+    # both shipped a "version 4" with different columns, so every database below 6 re-checks
+    # all of them: a database from either branch (or neither) ends up with every column.
+    if version < 6:
+        for table, column, definition in [
+            ("subjects", "catalog_id", "TEXT"),
+            ("users", "password_hash", "TEXT"),
+            ("users", "is_demo", "INTEGER NOT NULL DEFAULT 0 CHECK (is_demo IN (0, 1))"),
+            ("users", "recovery_hash", "TEXT"),
+        ]:
+            if column not in _columns(conn, table):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     if version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
@@ -58,18 +69,81 @@ def _rows(rows):
 
 # ---------- users ----------
 
-def get_or_create_user(conn, username, display_name=None):
+PUBLIC_USER_FIELDS = ("id, username, display_name, is_demo, created_at, "
+                      "password_hash IS NOT NULL AS has_password, recovery_hash IS NOT NULL AS has_recovery")
+
+
+def _public_user(row):
+    """A user without the password hash, safe to send to the browser."""
+    if row is None:
+        return None
+    user = dict(row)
+    user["is_demo"] = bool(user["is_demo"])
+    user["has_password"] = bool(user["has_password"])
+    user["has_recovery"] = bool(user["has_recovery"])
+    return user
+
+
+def create_user(conn, username, password_hash, display_name=None, is_demo=False, recovery_hash=None):
     username = username.strip()
-    conn.execute(
-        "INSERT OR IGNORE INTO users (username, display_name) VALUES (?, ?)",
-        (username, display_name or username),
+    cur = conn.execute(
+        """INSERT INTO users (username, display_name, password_hash, recovery_hash, is_demo)
+           VALUES (?, ?, ?, ?, ?)""",
+        (username, (display_name or "").strip() or username, password_hash, recovery_hash,
+         1 if is_demo else 0),
     )
     conn.commit()
-    return _row(conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone())
+    return get_user(conn, cur.lastrowid)
+
+
+def get_or_create_user(conn, username, display_name=None):
+    """For scripts and tests: the profile with this name, made without a password if missing.
+    The app itself signs people up through create_user, with a password."""
+    row = find_user_login(conn, username)
+    return get_user(conn, row["id"]) if row else create_user(conn, username, None, display_name)
 
 
 def get_user(conn, user_id):
-    return _row(conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+    return _public_user(conn.execute(
+        f"SELECT {PUBLIC_USER_FIELDS} FROM users WHERE id = ?", (user_id,)
+    ).fetchone())
+
+
+def find_user_login(conn, username):
+    """The full row, password hash included, for checking a sign-in. Never send it out."""
+    return _row(conn.execute("SELECT * FROM users WHERE username = ?", (username.strip(),)).fetchone())
+
+
+def set_password(conn, user_id, password_hash, recovery_hash=None):
+    """Set a new password, and with it a new recovery code (the old code stops working)."""
+    conn.execute("UPDATE users SET password_hash = ?, recovery_hash = ? WHERE id = ?",
+                 (password_hash, recovery_hash, user_id))
+    conn.commit()
+
+
+def list_profiles(conn):
+    """Every profile on this computer, demo first, for the sign-in screen."""
+    return [_public_user(r) for r in conn.execute(
+        f"SELECT {PUBLIC_USER_FIELDS} FROM users ORDER BY is_demo DESC, display_name COLLATE NOCASE"
+    )]
+
+
+# Which user owns a row, for checking that the signed-in student only touches their own data.
+OWNER_QUERIES = {
+    "user_id": "SELECT id FROM users WHERE id = ?",
+    "subject_id": "SELECT user_id FROM subjects WHERE id = ?",
+    "topic_id": "SELECT s.user_id FROM topics t JOIN subjects s ON s.id = t.subject_id WHERE t.id = ?",
+    "conversation_id": "SELECT user_id FROM conversations WHERE id = ?",
+    "document_id": "SELECT user_id FROM documents WHERE id = ?",
+    "event_id": "SELECT user_id FROM events WHERE id = ?",
+    "quiz_id": "SELECT user_id FROM quizzes WHERE id = ?",
+}
+
+
+def owner_of(conn, kind, row_id):
+    """The owning user's id, or None if the row doesn't exist."""
+    row = conn.execute(OWNER_QUERIES[kind], (row_id,)).fetchone()
+    return row[0] if row else None
 
 
 # ---------- subjects & topics ----------

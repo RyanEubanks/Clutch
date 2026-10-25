@@ -4,12 +4,17 @@
 
 PRAGMA foreign_keys = ON;
 
--- A student. No passwords yet: this is a local, hackathon-stage app.
+-- A student profile on this computer. password_hash keeps other people using the same
+-- computer out of a profile (NULL only for profiles made before passwords, until one is set,
+-- and for the demo). The demo profile (is_demo = 1) is rebuilt every time someone signs in.
 CREATE TABLE IF NOT EXISTS users (
-    id           INTEGER PRIMARY KEY,
-    username     TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    display_name TEXT,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    id            INTEGER PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    display_name  TEXT,
+    password_hash TEXT,
+    recovery_hash TEXT,  -- one-time code for "Forgot password?", hashed like the password
+    is_demo       INTEGER NOT NULL DEFAULT 0 CHECK (is_demo IN (0, 1)),
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- A course or area of study, e.g. "Calculus I". Owned by one student.

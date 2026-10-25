@@ -4,8 +4,24 @@ import app as app_module
 import db
 
 
+PASSWORD = "pass1234"
+
+
+def sign_up(client, username, password=PASSWORD):
+    """Make a profile; this also signs the test client in as it."""
+    r = client.post("/api/users", json={"username": username, "password": password})
+    assert r.status_code == 201, r.get_json()
+    return r.get_json()
+
+
+def sign_in(client, username, password=PASSWORD):
+    r = client.post("/api/session", json={"username": username, "password": password})
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+
 def setup_topic(client, username="alex"):
-    user = client.post("/api/users", json={"username": username}).get_json()
+    user = sign_up(client, username)
     subject = client.post(f"/api/users/{user['id']}/subjects", json={"name": "Calculus"}).get_json()
     topic = client.post(
         f"/api/subjects/{subject['id']}/topics",
@@ -14,11 +30,19 @@ def setup_topic(client, username="alex"):
     return user, subject, topic
 
 
-def test_login_is_idempotent_and_case_insensitive(client):
-    a = client.post("/api/users", json={"username": "Alex"}).get_json()
-    b = client.post("/api/users", json={"username": "alex"}).get_json()
-    assert a["id"] == b["id"]
-    assert client.post("/api/users", json={}).status_code == 400
+def test_sign_up_sign_in_and_names_are_case_insensitive(client):
+    user = sign_up(client, "Alex")
+    assert "password_hash" not in user and user["has_password"] and not user["is_demo"]
+    assert client.get("/api/session").get_json()["id"] == user["id"]
+    assert client.post("/api/users", json={"username": "alex", "password": "other1"}).status_code == 409
+    assert client.post("/api/users", json={"username": "sam", "password": "abc"}).status_code == 400
+    assert client.post("/api/users", json={"password": PASSWORD}).status_code == 400
+
+    client.delete("/api/session")
+    assert client.get("/api/session").status_code == 401
+    assert client.post("/api/session", json={"username": "ALEX", "password": "nope"}).status_code == 401
+    assert client.post("/api/session", json={"username": "nobody", "password": PASSWORD}).status_code == 404
+    assert sign_in(client, "ALEX")["id"] == user["id"]
 
 
 def test_subjects_and_topics_nest(client):
@@ -162,7 +186,7 @@ def test_invalid_confidence_rejected(client):
 
 def test_cannot_use_another_users_topic(client):
     _, _, topic = setup_topic(client, "alex")
-    other = client.post("/api/users", json={"username": "sam"}).get_json()
+    other = sign_up(client, "sam")
     r = client.post(f"/api/users/{other['id']}/conversations", json={"topic_id": topic["id"]})
     assert r.status_code == 404
 
@@ -296,7 +320,8 @@ def test_events_crud_and_validation(client, model):
         assert client.post(url, json=bad).status_code == 400, bad
 
     # Another student's topic can't be attached
-    other, _, other_topic = setup_topic(client, username="sam")
+    _, _, other_topic = setup_topic(client, username="sam")
+    sign_in(client, "alex")
     assert client.patch(f"/api/events/{exam['id']}", json={"topic_ids": [other_topic["id"]]}).status_code == 400
 
     assert client.delete(f"/api/events/{hw['id']}").status_code == 204
@@ -555,7 +580,7 @@ class ScriptedModel:
 
 def chat(client, monkeypatch, model, *student_messages):
     monkeypatch.setattr(app_module, "ask_model", model)
-    user = client.post("/api/users", json={"username": "kris"}).get_json()
+    user = sign_up(client, "kris")
     convo = client.post(f"/api/users/{user['id']}/conversations", json={}).get_json()
     out = None
     for text in student_messages:
@@ -630,3 +655,153 @@ def test_verdict_detection():
     assert app_module.verdict("Yes, that's right.") is True
     assert app_module.verdict("  Not quite. Look again.") is False
     assert app_module.verdict("What do you think?") is None
+
+
+# ---------- privacy between profiles ----------
+
+def test_data_needs_sign_in_but_stateless_endpoints_stay_open(client, model):
+    user, _, topic = setup_topic(client)
+    client.delete("/api/session")
+    for url in (f"/api/users/{user['id']}/subjects", f"/api/users/{user['id']}/documents",
+                f"/api/users/{user['id']}/planner", f"/api/users/{user['id']}/events"):
+        assert client.get(url).status_code == 401, url
+    assert client.post(f"/api/topics/{topic['id']}/quiz").status_code == 401
+    # Nothing saved, so no sign-in needed (eval_tutor.py and chat_cli.py rely on this)
+    assert client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]}).status_code == 200
+    assert client.get("/api/health").status_code == 200
+
+
+def test_one_profile_cannot_read_or_change_anothers_data(client, model):
+    alex, subject, topic = setup_topic(client, "alex")
+    doc = client.post(f"/api/users/{alex['id']}/documents",
+                      json={"title": "Private notes", "content": "my notes"}).get_json()
+    convo = client.post(f"/api/users/{alex['id']}/conversations", json={"topic_id": topic["id"]}).get_json()
+    event = client.post(f"/api/users/{alex['id']}/events",
+                        json={"kind": "exam", "title": "Midterm", "date": "2026-11-12"}).get_json()
+
+    sign_up(client, "sam")
+    for method, url in [
+        ("get", f"/api/users/{alex['id']}"), ("get", f"/api/users/{alex['id']}/documents"),
+        ("get", f"/api/users/{alex['id']}/conversations"), ("get", f"/api/users/{alex['id']}/planner"),
+        ("get", f"/api/documents/{doc['id']}"), ("delete", f"/api/documents/{doc['id']}"),
+        ("get", f"/api/conversations/{convo['id']}"), ("delete", f"/api/conversations/{convo['id']}"),
+        ("post", f"/api/conversations/{convo['id']}/messages"), ("patch", f"/api/events/{event['id']}"),
+        ("delete", f"/api/subjects/{subject['id']}"), ("post", f"/api/topics/{topic['id']}/quiz"),
+    ]:
+        r = getattr(client, method)(url, json={"content": "x", "done": True})
+        assert r.status_code == 404, (method, url, r.status_code)  # looks missing, so ids can't be probed
+
+    sign_in(client, "alex")  # all still there
+    assert client.get(f"/api/documents/{doc['id']}").get_json()["content"] == "my notes"
+    assert client.get(f"/api/conversations/{convo['id']}").status_code == 200
+    assert client.get(f"/api/users/{alex['id']}/subjects").get_json()[0]["name"] == "Calculus"
+
+
+def test_profile_from_before_passwords_must_set_one(client, tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    old = db.create_user(conn, "ry", None)  # as profiles made before passwords existed
+    conn.close()
+    profiles = client.get("/api/profiles").get_json()
+    assert profiles == [{**old, "has_password": False}] and "password_hash" not in profiles[0]
+
+    r = client.post("/api/session", json={"username": "ry", "password": ""})
+    assert r.status_code == 409 and r.get_json()["needs_password"]
+    assert client.post("/api/session", json={"username": "ry", "new_password": "ab"}).status_code == 400
+    assert client.post("/api/session", json={"username": "ry", "new_password": "secret1"}).status_code == 200
+    client.delete("/api/session")
+    # From now on it's an ordinary password
+    assert client.post("/api/session", json={"username": "ry", "new_password": "hijack"}).status_code == 401
+    assert sign_in(client, "ry", "secret1")["has_password"]
+
+
+def test_demo_profile_is_rebuilt_on_every_sign_in(tmp_path, model):
+    flask_app = app_module.create_app(tmp_path / "demo.db", demo_account=True)
+    client = flask_app.test_client()
+    alex = client.get("/api/profiles").get_json()[0]
+    assert alex["username"] == "alex" and alex["is_demo"] and not alex["has_password"]
+
+    def snapshot():
+        return {
+            "subjects": [s["name"] for s in client.get(f"/api/users/{alex['id']}/subjects").get_json()],
+            "chats": len(client.get(f"/api/users/{alex['id']}/conversations").get_json()),
+            "docs": len(client.get(f"/api/users/{alex['id']}/documents").get_json()),
+        }
+
+    assert client.post("/api/session", json={"username": "alex"}).status_code == 200  # no password
+    first = snapshot()
+    assert first == {"subjects": ["Calculus I", "Linear Algebra"], "chats": 6, "docs": 4}
+    calc, linalg = client.get(f"/api/users/{alex['id']}/subjects").get_json()
+    assert calc["catalog_id"] == "calculus-1" and linalg["catalog_id"] is None  # verified + custom
+    plan = client.get(f"/api/users/{alex['id']}/planner").get_json()
+    assert plan["due"] and plan["tests"][0]["title"] == "Calculus Midterm 2" and plan["tests"][0]["days_left"] == 6
+    assert plan["metrics"]["streak"] >= 4
+
+    # Changes made during a demo are gone after the next sign-in
+    client.post(f"/api/users/{alex['id']}/subjects", json={"name": "Chemistry"})
+    client.post(f"/api/users/{alex['id']}/documents", json={"title": "scratch", "content": "x"})
+    assert client.post("/api/session", json={"username": "alex"}).status_code == 200
+    assert snapshot() == first
+
+    # A real profile is never touched by the demo
+    sam = sign_up(client, "sam")
+    client.post(f"/api/users/{sam['id']}/subjects", json={"name": "Biology"})
+    client.post("/api/session", json={"username": "alex"})
+    sign_in(client, "sam")
+    assert [s["name"] for s in client.get(f"/api/users/{sam['id']}/subjects").get_json()] == ["Biology"]
+
+
+# ---------- forgot password ----------
+
+def test_recovery_code_resets_a_forgotten_password(client):
+    code = client.post("/api/users", json={"username": "ry", "password": PASSWORD}).get_json()["recovery_code"]
+    assert len(code) == 14 and code.count("-") == 2
+    assert client.get("/api/session").get_json()["has_recovery"]
+    assert "recovery_code" not in client.get("/api/session").get_json()  # shown once, never again
+    client.delete("/api/session")
+
+    url = "/api/session/recover"
+    assert client.post(url, json={"username": "ry", "recovery_code": "AAAA-BBBB-CCCC",
+                                  "new_password": "newpass1"}).status_code == 401
+    assert client.post(url, json={"username": "ry", "recovery_code": code,
+                                  "new_password": "ab"}).status_code == 400
+    # Typed lowercase without dashes still works
+    r = client.post(url, json={"username": "ry", "recovery_code": code.replace("-", "").lower(),
+                               "new_password": "newpass1"})
+    assert r.status_code == 200
+    second_code = r.get_json()["recovery_code"]
+    assert second_code != code and client.get("/api/session").status_code == 200
+
+    client.delete("/api/session")
+    assert client.post("/api/session", json={"username": "ry", "password": PASSWORD}).status_code == 401
+    sign_in(client, "ry", "newpass1")
+    client.delete("/api/session")
+    # A code works once
+    assert client.post(url, json={"username": "ry", "recovery_code": code,
+                                  "new_password": "again12"}).status_code == 401
+
+
+def test_first_password_also_gives_a_recovery_code_and_profiles_without_one_get_the_command(client, tmp_path):
+    conn = db.connect(tmp_path / "test.db")
+    db.create_user(conn, "old", None)
+    db.create_user(conn, "nocode", __import__("werkzeug.security").security.generate_password_hash(PASSWORD))
+    conn.close()
+    r = client.post("/api/session", json={"username": "old", "new_password": "secret1"})
+    assert r.status_code == 200 and r.get_json()["recovery_code"]
+    client.delete("/api/session")
+
+    r = client.post("/api/session/recover", json={"username": "nocode", "recovery_code": "x", "new_password": "secret1"})
+    assert r.status_code == 409 and r.get_json()["no_recovery_code"]
+    assert "flask --app app reset-password nocode" in r.get_json()["error"]
+
+
+def test_reset_password_terminal_command(tmp_path, model):
+    flask_app = app_module.create_app(tmp_path / "cli.db", demo_account=True)
+    client = flask_app.test_client()
+    sign_up(client, "ry")
+    runner = flask_app.test_cli_runner()
+    result = runner.invoke(args=["reset-password", "ry"], input="fresh123\nfresh123\n")
+    assert result.exit_code == 0 and "New recovery code" in result.output
+    client.delete("/api/session")
+    sign_in(client, "ry", "fresh123")
+    assert runner.invoke(args=["reset-password", "nobody"], input="x\nx\n").exit_code != 0
+    assert runner.invoke(args=["reset-password", "alex"], input="x\nx\n").exit_code != 0  # the demo

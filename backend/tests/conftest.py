@@ -37,6 +37,6 @@ def model(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path, model):
-    flask_app = app_module.create_app(tmp_path / "test.db")
+    flask_app = app_module.create_app(tmp_path / "test.db", demo_account=False)
     flask_app.config["TESTING"] = True
     return flask_app.test_client()

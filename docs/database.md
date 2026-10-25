@@ -8,7 +8,7 @@ Schema: `backend/schema.sql`. Data access: `backend/db.py`.
 
 | Table | What it holds |
 |---|---|
-| `users` | Students. Username-only sign-in for now (no passwords). |
+| `users` | Profiles on this computer: `password_hash` (Werkzeug scrypt; NULL until a pre-password profile sets one), `recovery_hash` (one-time code for a forgotten password, hashed the same way) and `is_demo`. |
 | `subjects` | A student's courses, e.g. "Calculus I". `catalog_id` (v4) links one to a standard course in `courses.py`; NULL = custom course. |
 | `topics` | Units inside a subject, e.g. "Chain rule". Progress is tracked per topic. |
 | `conversations` | Study sessions. Optional `topic_id`; `ended_at` set once reviewed. |
@@ -50,6 +50,28 @@ characters (default 6000) because of Ollama's small default context window (see 
   limit (`MATHCHECK_TIMEOUT`, default 8 seconds).
 - Passing awards the badge; failing allows a fresh quiz. Asking for a quiz while one is still open returns that one.
 - All three settings can be overridden in `.env`.
+
+## Profiles, sign-in and the demo
+
+- The sign-in screen lists every profile on the computer (`GET /api/profiles`: names only).
+  Each profile has a password, so others using the same computer can't open its notes.
+- Signing in sets a signed, HttpOnly session cookie that ends when the browser closes. The key is
+  `SECRET_KEY` in `.env`, or `backend/user_data/secret_key`, made on first start (git-ignored).
+- Every data endpoint needs a sign-in (401 otherwise), and a check in `require_sign_in` (app.py)
+  looks up the owner of each id in the URL (`db.OWNER_QUERIES`). Someone else's row answers 404,
+  the same as a missing one. Endpoints that store nothing stay open: `/api/chat`, scanning,
+  lecture transcription and notes, so `eval_tutor.py` and `chat_cli.py` still work.
+- Profiles made before passwords existed choose one the first time they sign in.
+- Forgot password: whenever a password is set (new profile, first password, reset), the student is
+  shown a one-time recovery code (`XXXX-XXXX-XXXX`, no look-alike characters) to write down. It
+  resets the password once and is replaced by a new code. Lost that too: someone with access to
+  the computer runs `flask --app app reset-password <name>` in `backend/` (it prompts for the
+  new password and prints a new code). That needs the same access that can read the database
+  file, so it opens no new way in.
+- **Alex** (`username = alex`, `is_demo = 1`, no password) is the demo. `backend/demo.py`
+  rebuilds Alex's data on every sign-in, dated from today: a 4-day streak ending yesterday,
+  reviews due, a midterm in 6 days, 6 past sessions, 4 materials and a badge. It never
+  touches another profile. Tests run with `create_app(..., demo_account=False)`.
 
 ## Planner (spaced repetition)
 
@@ -111,7 +133,10 @@ be linked with "find a matching course" (`PATCH /api/subjects/<id>`), keeping th
 
 ## API
 
-- `POST /api/users` `{username}` - sign in / create
+- `GET /api/profiles` - profiles for the sign-in screen (no data, no hashes)
+- `POST /api/users` `{username, password}` - new profile (password 4+ characters); signs in
+- `POST /api/session` `{username, password}` (or `{username, new_password}` for a pre-password profile) - sign in; `GET /api/session` - who's signed in; `DELETE /api/session` - sign out
+- `POST /api/session/recover` `{username, recovery_code, new_password}` - forgot password; signs in and returns a new `recovery_code`
 - `GET|POST /api/users/<uid>/subjects`, `DELETE /api/subjects/<id>`
 - `POST /api/subjects/<id>/topics`, `DELETE /api/topics/<id>`
 - `GET|POST /api/users/<uid>/conversations`, `GET|DELETE /api/conversations/<id>`

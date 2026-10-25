@@ -5,15 +5,21 @@ import math
 import os
 import random
 import re
+import secrets
 import sqlite3
+import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, g, jsonify, request
+import click
+from flask import Flask, g, jsonify, request, session
+from werkzeug.security import check_password_hash, generate_password_hash
 from openai import OpenAI
 
 import courses
 import db
+import demo
 import factbank
 import groundcheck
 import planner
@@ -33,6 +39,22 @@ client = OpenAI(base_url=os.getenv("MODEL_BASE_URL"), api_key="local")
 # Ollama runs models with a small context window by default (see docs/devlog.txt),
 # so cap how much study material goes into each prompt. Raise this once num_ctx is raised.
 DOC_CHAR_BUDGET = int(os.getenv("DOC_CHAR_BUDGET", "6000"))
+
+MIN_PASSWORD_LENGTH = 4  # profiles on a shared computer, not internet accounts
+
+# Recovery codes: 12 characters from a set with no look-alikes (no 0/O, 1/I/L), shown as XXXX-XXXX-XXXX
+RECOVERY_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+
+
+def new_recovery_code():
+    """A fresh recovery code and its hash. The code is shown to the student once, never stored."""
+    raw = "".join(secrets.choice(RECOVERY_ALPHABET) for _ in range(12))
+    return f"{raw[:4]}-{raw[4:8]}-{raw[8:]}", generate_password_hash(raw)
+
+
+def normalize_recovery_code(code):
+    """Accept it however it's typed: lowercase, with or without dashes or spaces."""
+    return re.sub(r"[^0-9A-Za-z]", "", code or "").upper()
 
 # Mastery quizzes: unlock at this topic mastery, pass with this fraction correct.
 QUIZ_UNLOCK_MASTERY = float(os.getenv("QUIZ_UNLOCK_MASTERY", "0.8"))
@@ -706,14 +728,32 @@ def suggest_courses(query):
     return suggestions, source
 
 
-def create_app(db_path=None):
+def load_secret_key(data_dir):
+    """The key that signs sign-in cookies: SECRET_KEY from .env, else one made once and kept
+    next to the database (git-ignored), so restarting Flask doesn't sign everyone out."""
+    if os.getenv("SECRET_KEY"):
+        return os.getenv("SECRET_KEY")
+    path = Path(data_dir) / "secret_key"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(secrets.token_hex(32))
+    return path.read_text().strip()
+
+
+def create_app(db_path=None, demo_account=True):
     app = Flask(__name__)
     app.config["DATABASE_PATH"] = db_path or db.db_path()
+    app.secret_key = load_secret_key(Path(app.config["DATABASE_PATH"]).parent)
+    # The sign-in cookie: JavaScript can't read it, and it ends when the browser closes,
+    # which matters on a computer other people use too.
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
     conn = db.connect(app.config["DATABASE_PATH"])
     db.init_db(conn)
     # Courses named exactly like a standard course ("Elementary Math") get linked to it.
     db.link_catalog_names(conn, {c["name"].lower(): c["id"] for c in courses.CATALOG})
+    if demo_account:
+        demo.ensure_demo_user(conn)
     conn.close()
 
     def get_db():
@@ -736,6 +776,129 @@ def create_app(db_path=None):
 
     def not_found(what):
         return jsonify(error=f"{what} not found"), 404
+
+    # ---------- signing in ----------
+    # Everything a student saved is behind their sign-in: each request may only touch rows
+    # owned by the signed-in user. Endpoints that store nothing (stateless chat, scanning,
+    # transcribing) stay open, so eval_tutor.py and chat_cli.py keep working.
+
+    OPEN_ENDPOINTS = {
+        "health", "chat", "read_homework", "study_guide", "transcribe_lecture", "lecture_notes",
+        "profiles", "sign_up", "sign_in", "sign_out", "current_session", "recover_password", "static",
+        "list_courses", "suggest",  # the course catalog: the same for everyone, nothing stored
+    }
+
+    @app.before_request
+    def require_sign_in():
+        if not request.path.startswith("/api/") or request.endpoint in OPEN_ENDPOINTS:
+            return None
+        user_id = session.get("user_id")
+        if not user_id or not db.get_user(get_db(), user_id):
+            session.clear()
+            return jsonify(error="Please sign in"), 401
+        # Someone else's row looks exactly like a missing one, so ids can't be probed
+        for kind, row_id in (request.view_args or {}).items():
+            if kind in db.OWNER_QUERIES:
+                owner = db.owner_of(get_db(), kind, row_id)
+                if owner is not None and owner != user_id:
+                    return not_found(kind.removesuffix("_id").capitalize())
+        return None
+
+    def start_session(user, recovery_code=None):
+        """Sign in. A new recovery code rides along once, for the student to write down."""
+        session.clear()
+        session["user_id"] = user["id"]
+        return jsonify({**user, "recovery_code": recovery_code} if recovery_code else user)
+
+    def password_problem(password):
+        if len(password) < MIN_PASSWORD_LENGTH:
+            return f"Use a password of at least {MIN_PASSWORD_LENGTH} characters"
+        return None
+
+    @app.get("/api/profiles")
+    def profiles():
+        """The profiles on this computer, for the sign-in screen (no passwords, no data)."""
+        return jsonify(db.list_profiles(get_db()))
+
+    @app.post("/api/users")
+    def sign_up():
+        """Make a new profile with a password, and sign in to it."""
+        username = (body().get("username") or "").strip()
+        password = body().get("password") or ""
+        if not username:
+            return jsonify(error="name is required"), 400
+        if len(username) > 40:
+            return jsonify(error="Keep the name under 40 characters"), 400
+        if problem := password_problem(password):
+            return jsonify(error=problem), 400
+        if db.find_user_login(get_db(), username):
+            return jsonify(error="That name is taken on this computer. Pick another, or sign in."), 409
+        code, code_hash = new_recovery_code()
+        user = db.create_user(get_db(), username, generate_password_hash(password), body().get("display_name"),
+                              recovery_hash=code_hash)
+        return start_session(user, code), 201
+
+    @app.post("/api/session")
+    def sign_in():
+        """Sign in. Body: {"username", "password"}. A profile made before passwords existed
+        gets one here: send {"username", "new_password"}. The demo needs no password, and
+        signing in to it rebuilds its data so every demo starts the same."""
+        conn = get_db()
+        row = db.find_user_login(conn, body().get("username") or "")
+        if not row:
+            return jsonify(error="No profile with that name"), 404
+        if row["is_demo"]:
+            demo.reset_demo(conn, row["id"])
+            return start_session(db.get_user(conn, row["id"]))
+        if row["password_hash"] is None:
+            new_password = body().get("new_password")
+            if new_password is None:
+                return jsonify(error="This profile needs a password first", needs_password=True), 409
+            if problem := password_problem(new_password):
+                return jsonify(error=problem, needs_password=True), 400
+            code, code_hash = new_recovery_code()
+            db.set_password(conn, row["id"], generate_password_hash(new_password), code_hash)
+            return start_session(db.get_user(conn, row["id"]), code)
+        if not check_password_hash(row["password_hash"], body().get("password") or ""):
+            time.sleep(0.5)  # slow down guessing
+            return jsonify(error="Wrong password"), 401
+        return start_session(db.get_user(conn, row["id"]))
+
+    @app.post("/api/session/recover")
+    def recover_password():
+        """Forgot password: {"username", "recovery_code", "new_password"}. The code is used up,
+        and a new one comes back with the sign-in."""
+        conn = get_db()
+        row = db.find_user_login(conn, body().get("username") or "")
+        if not row:
+            return jsonify(error="No profile with that name"), 404
+        if row["is_demo"] or row["password_hash"] is None:
+            return jsonify(error="This profile has no password to reset"), 400
+        if row["recovery_hash"] is None:
+            return jsonify(error="This profile has no recovery code. Someone with access to this computer can "
+                                 f"reset it from a terminal: flask --app app reset-password {row['username']}",
+                           no_recovery_code=True), 409
+        if problem := password_problem(body().get("new_password") or ""):
+            return jsonify(error=problem), 400
+        if not check_password_hash(row["recovery_hash"], normalize_recovery_code(body().get("recovery_code"))):
+            time.sleep(0.5)  # slow down guessing
+            return jsonify(error="That recovery code doesn't match"), 401
+        code, code_hash = new_recovery_code()
+        db.set_password(conn, row["id"], generate_password_hash(body()["new_password"]), code_hash)
+        return start_session(db.get_user(conn, row["id"]), code)
+
+    @app.get("/api/session")
+    def current_session():
+        user = db.get_user(get_db(), session.get("user_id") or 0)
+        if not user:
+            session.clear()
+            return jsonify(error="Not signed in"), 401
+        return jsonify(user)
+
+    @app.delete("/api/session")
+    def sign_out():
+        session.clear()
+        return "", 204
 
     # ---------- health & stateless chat ----------
 
@@ -863,14 +1026,6 @@ def create_app(db_path=None):
         return jsonify(guide=guide)
 
     # ---------- users ----------
-
-    @app.post("/api/users")
-    def login():
-        """Sign in by username, creating the user the first time. No passwords yet."""
-        username = (body().get("username") or "").strip()
-        if not username:
-            return jsonify(error="username is required"), 400
-        return jsonify(db.get_or_create_user(get_db(), username, body().get("display_name")))
 
     @app.get("/api/users/<int:user_id>")
     def get_user(user_id):
@@ -1326,6 +1481,26 @@ def create_app(db_path=None):
     @app.get("/api/users/<int:user_id>/badges")
     def list_badges(user_id):
         return jsonify(db.list_badges(get_db(), user_id))
+
+    @app.cli.command("reset-password")
+    @click.argument("username")
+    def reset_password_command(username):
+        """Last resort for a forgotten password AND a lost recovery code. Needs access to this
+        computer's files, which can read the database anyway, so it adds no new way in."""
+        conn = db.connect(app.config["DATABASE_PATH"])
+        try:
+            row = db.find_user_login(conn, username)
+            if not row or row["is_demo"]:
+                raise click.ClickException(f'No profile named "{username}" with a password to reset')
+            password = click.prompt(f"New password for {row['username']}", hide_input=True,
+                                    confirmation_prompt=True)
+            if len(password) < MIN_PASSWORD_LENGTH:
+                raise click.ClickException(f"Use at least {MIN_PASSWORD_LENGTH} characters")
+            code, code_hash = new_recovery_code()
+            db.set_password(conn, row["id"], generate_password_hash(password), code_hash)
+            click.echo(f"Password changed. New recovery code (write it down): {code}")
+        finally:
+            conn.close()
 
     return app
 

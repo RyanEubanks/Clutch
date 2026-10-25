@@ -2057,3 +2057,184 @@ button.chip.add:hover {
   vertical-align: -0.05rem;
   box-sizing: border-box;
 }
+
+/* ---------- sign-in: profile picker ---------- */
+
+.signin {
+  max-width: 560px;
+  margin: 8vh auto 2rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-align: center;
+}
+
+.signin > .status {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+}
+
+button.profile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.9rem 0.5rem 0.75rem;
+  background: white;
+  color: #1d1d1f;
+  border: 2px solid #dcdce0;
+  border-radius: 14px;
+  min-width: 0;
+}
+
+button.profile-card:hover {
+  border-color: #93c5fd;
+}
+
+button.profile-card.picked {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px #dbeafe;
+}
+
+.avatar {
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.avatar.plus {
+  background: #eef0f4;
+  color: #2563eb;
+  font-size: 1.8rem;
+  font-weight: 400;
+}
+
+.profile-name {
+  max-width: 100%;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-tag {
+  font-size: 0.7rem;
+  color: #666;
+  background: #f4f4f6;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+
+.profile-tag.demo {
+  background: #fff8e6;
+  color: #92400e;
+  font-weight: 600;
+}
+
+.signin-panel {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  text-align: left;
+}
+
+.signin-panel .status {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+p.signin-panel {
+  text-align: center;
+}
+
+.signin-note {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* Forgot password and recovery codes */
+.signin h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #5b3a29;
+}
+
+.signin > .signin-note {
+  max-width: 400px;
+}
+
+button.forgot-link {
+  align-self: center;
+  font-size: 0.85rem;
+}
+
+.recovery-code {
+  font: 600 1.6rem/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.08em;
+  padding: 0.9rem 1.3rem;
+  background: white;
+  border: 2px dashed #5b3a29;
+  border-radius: 12px;
+  color: #1d1d1f;
+  user-select: all;
+}
+
+.code-input {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+pre.command {
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  background: #1d1d1f;
+  color: #f4f4f6;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+.signin-panel code {
+  font-size: 0.8rem;
+  background: #eceff5;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-style: normal;
+}
+
+label.saved-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
+}
+
+label.saved-check input {
+  margin: 0;
+  padding: 0;
+  width: 1rem;
+  height: 1rem;
+}

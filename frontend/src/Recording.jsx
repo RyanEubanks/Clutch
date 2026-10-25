@@ -7,20 +7,29 @@ import { RecordingContext } from './useRecording'
 // Each ~25 s piece is transcribed as soon as it's recorded; the transcript is backed up in
 // this browser so a closed tab or crash doesn't lose a lecture.
 
-const DRAFT_KEY = 'clutch.lectureDraft'
+// One backup per profile, so a profile never sees (or overwrites) someone else's lecture
+const draftKey = (owner) => `clutch.lectureDraft.${owner}`
 
-function loadDraft() {
+try {
+  localStorage.removeItem('clutch.lectureDraft') // older backups weren't tied to a profile
+} catch {
+  // Storage unavailable
+}
+
+function loadDraft(owner) {
+  if (!owner) return null
   try {
-    return JSON.parse(localStorage.getItem(DRAFT_KEY))
+    return JSON.parse(localStorage.getItem(draftKey(owner)))
   } catch {
     return null
   }
 }
 
-function saveDraft(draft) {
+function saveDraft(owner, draft) {
+  if (!owner) return
   try {
-    if (draft) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
-    else localStorage.removeItem(DRAFT_KEY)
+    if (draft) localStorage.setItem(draftKey(owner), JSON.stringify(draft))
+    else localStorage.removeItem(draftKey(owner))
   } catch {
     // Storage unavailable: the transcript just isn't backed up
   }
@@ -37,7 +46,8 @@ export function RecordingProvider({ children }) {
   const [error, setError] = useState('')
   const [notes, setNotes] = useState('')
   const [organizing, setOrganizing] = useState(false)
-  const [draft, setDraft] = useState(loadDraft)
+  const [owner, setOwnerState] = useState(null) // the signed-in profile's id
+  const [draft, setDraft] = useState(null)
 
   const recorder = useRef(null)
   const queue = useRef(Promise.resolve())
@@ -146,9 +156,15 @@ export function RecordingProvider({ children }) {
     setSeconds(0)
     setNotes('')
     setError('')
-    saveDraft(null)
+    saveDraft(owner, null)
     setDraft(null)
   }
+
+  // App calls this when someone signs in or out (stable, so App can use it in an effect)
+  const setOwner = useCallback((id) => {
+    setOwnerState(id)
+    setDraft(loadDraft(id))
+  }, [])
 
   function recoverDraft() {
     if (!draft) return
@@ -160,16 +176,16 @@ export function RecordingProvider({ children }) {
   }
 
   function discardDraft() {
-    saveDraft(null)
+    saveDraft(owner, null)
     setDraft(null)
   }
 
   // Back up the transcript as it grows
   useEffect(() => {
     if (status !== 'idle' && transcript) {
-      saveDraft({ transcript, seconds, savedAt: new Date().toISOString() })
+      saveDraft(owner, { transcript, seconds, savedAt: new Date().toISOString() })
     }
-  }, [status, transcript, seconds])
+  }, [owner, status, transcript, seconds])
 
   // Warn before closing the tab mid-lecture
   useEffect(() => {
@@ -197,6 +213,7 @@ export function RecordingProvider({ children }) {
     notes,
     organizing,
     draft,
+    setOwner,
     start,
     pause,
     resume,

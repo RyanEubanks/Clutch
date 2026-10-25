@@ -4,14 +4,13 @@ import './App.css'
 import Chat from './Chat.jsx'
 import Homework from './Homework.jsx'
 import Materials from './Materials.jsx'
-import { Hen, Logo } from './Mascot.jsx'
+import { Logo } from './Mascot.jsx'
 import Planner from './Planner.jsx'
 import Progress from './Progress.jsx'
 import Quiz from './Quiz.jsx'
+import SignIn from './SignIn.jsx'
 import { formatDuration } from './recorder'
 import { useRecording } from './useRecording'
-
-const USER_KEY = 'clutch.user'
 
 const VIEWS = [
   ['chat', 'Study'],
@@ -21,25 +20,10 @@ const VIEWS = [
   ['progress', 'Progress'],
 ]
 
-function loadSavedUser() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_KEY))
-  } catch {
-    return null
-  }
-}
-
-function saveUser(user) {
-  try {
-    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
-    else localStorage.removeItem(USER_KEY)
-  } catch {
-    // Storage unavailable (private window etc.): you'll just sign in again next time.
-  }
-}
-
 export default function App() {
-  const [user, setUser] = useState(loadSavedUser)
+  // undefined while checking with the server, null when nobody is signed in
+  const [user, setUser] = useState(undefined)
+  const recording = useRecording()
   const [view, setView] = useState('chat')
   const [subjects, setSubjects] = useState([])
   const [conversations, setConversations] = useState([])
@@ -73,19 +57,53 @@ export default function App() {
     refreshConversations()
   }, [refreshSubjects, refreshConversations])
 
+  // Who's signed in is the server's call (a cookie it set), not something saved in the browser
+  const { setOwner } = recording
+  useEffect(() => {
+    api
+      .session()
+      .then((u) => {
+        setUser(u)
+        setOwner(u.id)
+      })
+      .catch(() => setUser(null))
+  }, [setOwner])
+
   function signIn(u) {
-    saveUser(u)
+    clearSession()
+    setView('chat')
     setUser(u)
+    recording.setOwner(u.id)
   }
 
-  function signOut() {
-    saveUser(null)
+  const clearSession = useCallback(() => {
     setUser(null)
     setSubjects([])
     setConversations([])
     setActiveId(null)
     setHomework('')
     setHomeworkTitle('')
+  }, [])
+
+  // Any request answered "please sign in" (e.g. the sign-in ended) lands back on the picker
+  useEffect(() => {
+    window.addEventListener('clutch:signed-out', clearSession)
+    return () => window.removeEventListener('clutch:signed-out', clearSession)
+  }, [clearSession])
+
+  async function signOut() {
+    if (recording.status !== 'idle') {
+      const ok = window.confirm(
+        recording.active
+          ? 'A lecture is still being recorded. Signing out stops it and throws away its transcript.'
+          : "This lecture's transcript hasn't been saved to Materials. Sign out and throw it away?",
+      )
+      if (!ok) return
+      recording.reset()
+    }
+    recording.setOwner(null)
+    await api.signOut().catch(() => {})
+    clearSession()
   }
 
   function openMaterial(id) {
@@ -130,7 +148,8 @@ export default function App() {
     refreshConversations()
   }
 
-  if (!user) return <Login onSignIn={signIn} />
+  if (user === undefined) return null // checking whether someone is signed in
+  if (!user) return <SignIn onSignIn={signIn} />
 
   const topics = topicOptions(subjects)
 
@@ -270,33 +289,5 @@ function RecordingIndicator({ onOpen }) {
     <button className={`rec-indicator ${rec.status}`} onClick={onOpen} title="Open the lecture recorder">
       <span className="rec-dot" /> {label}
     </button>
-  )
-}
-
-function Login({ onSignIn }) {
-  const [username, setUsername] = useState('')
-  const [error, setError] = useState('')
-
-  async function submit(e) {
-    e.preventDefault()
-    if (!username.trim()) return
-    try {
-      onSignIn(await api.login(username.trim()))
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  return (
-    <form className="login" onSubmit={submit}>
-      <Hen pose="wave" size={160} className="login-hen" />
-      <h1 className="wordmark">Clutch</h1>
-      <p className="status">
-        Mother Hen helps you work things out yourself. Enter a username to sign in or get started.
-      </p>
-      <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoFocus />
-      <button type="submit">Continue</button>
-      {error && <p className="error">{error}</p>}
-    </form>
   )
 }

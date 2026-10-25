@@ -7,12 +7,32 @@ async function request(path, { method = 'GET', body } = {}) {
   })
   if (res.status === 204) return null
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
+  if (!res.ok) {
+    // Signed out (or the sign-in expired) while using the app: App goes back to the picker
+    if (res.status === 401 && !path.startsWith('/session')) {
+      window.dispatchEvent(new Event('clutch:signed-out'))
+    }
+    const err = new Error(data.error || `Request failed (${res.status})`)
+    err.status = res.status
+    err.data = data
+    throw err
+  }
   return data
 }
 
 export const api = {
-  login: (username) => request('/users', { method: 'POST', body: { username } }),
+  profiles: () => request('/profiles'),
+  session: () => request('/session'),
+  signUp: (username, password) => request('/users', { method: 'POST', body: { username, password } }),
+  // A profile made before passwords sends newPassword instead, to set one
+  signIn: (username, password, newPassword) =>
+    request('/session', { method: 'POST', body: { username, password, new_password: newPassword } }),
+  signOut: () => request('/session', { method: 'DELETE' }),
+  recoverPassword: (username, recoveryCode, newPassword) =>
+    request('/session/recover', {
+      method: 'POST',
+      body: { username, recovery_code: recoveryCode, new_password: newPassword },
+    }),
 
   subjects: (userId) => request(`/users/${userId}/subjects`),
   createSubject: (userId, name) =>

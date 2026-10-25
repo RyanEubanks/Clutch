@@ -6,7 +6,7 @@ import db
 
 
 def mastered_topic(client, model, catalog_id, topic_name):
-    user = client.post("/api/users", json={"username": "kris"}).get_json()
+    user = client.post("/api/users", json={"username": "kris", "password": "pass1234"}).get_json()
     subject = client.post(f"/api/users/{user['id']}/subjects",
                           json={"catalog_id": catalog_id, "topic": topic_name}).get_json()
     topic = subject["topic"]
@@ -92,7 +92,7 @@ def test_biology_quiz_is_checked_against_notes(client, model):
 
 
 def test_custom_course_quiz_still_offers_math(client, model):
-    user = client.post("/api/users", json={"username": "kris"}).get_json()
+    user = client.post("/api/users", json={"username": "kris", "password": "pass1234"}).get_json()
     s = client.post(f"/api/users/{user['id']}/subjects", json={"name": "My stuff"}).get_json()
     t = client.post(f"/api/subjects/{s['id']}/topics", json={"name": "Things"}).get_json()
     model.review = json.dumps({"understanding": 0.95})

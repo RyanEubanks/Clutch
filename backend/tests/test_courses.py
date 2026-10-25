@@ -103,7 +103,7 @@ def test_suggest_nothing_for_unknown_courses(client, model):
 # ---------- creating subjects from the catalog ----------
 
 def login(client):
-    return client.post("/api/users", json={"username": "kris"}).get_json()
+    return client.post("/api/users", json={"username": "kris", "password": "pass1234"}).get_json()
 
 
 def test_create_catalog_course_with_topic_and_reuse_it(client):

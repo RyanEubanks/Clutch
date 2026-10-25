@@ -125,4 +125,9 @@ TROUBLESHOOTING
                                         (run: ollama list / ollama pull gemma4:e2b).
 - Frontend shows a network/proxy error -> Flask isn't running, or it's not on port 5001.
 - "flask is not recognized"            -> the venv isn't activated (run the Activate.ps1 line).
+- Forgot a profile's password          -> click "Forgot password?" and enter the recovery code.
+                                          Lost the code too? In backend, with the venv active:
+                                            flask --app app reset-password <profile name>
+- Demo for the video                   -> pick "Alex" on the sign-in screen (no password).
+                                          Alex's data is rebuilt fresh every time.
 - To leave the venv:                      deactivate
