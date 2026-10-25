@@ -1127,3 +1127,16 @@ button.jump:hover {
 .file-link input {
   display: none;
 }
+
+.scan-progress {
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  background: #e8eefc;
+  color: #1e40af;
+  font-size: 0.9rem;
+}
+
+.scan-box .error {
+  margin: 0;
+}

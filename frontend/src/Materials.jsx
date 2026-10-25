@@ -317,31 +317,34 @@ function Reader({ doc, docs, onStudy, onDelete }) {
 }
 
 function AddMaterial({ user, topics, onSaved, onCancel }) {
-  const [images, setImages] = useState([])
+  const [images, setImages] = useState([]) // pages waiting to be read (or that failed)
   const [reading, setReading] = useState('') // progress message while pages are read
+  const [scanError, setScanError] = useState('')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [topicId, setTopicId] = useState('')
   const [error, setError] = useState('')
 
-  // Read one page per request so we can show progress and keep what's done if one fails
-  async function readNotes() {
-    setError('')
+  // Pages are read as soon as they're added, one per request, so we can show progress
+  // and keep what's done if one fails. Any pages left from a failed read go first.
+  async function readNotes(pages) {
     let text = content.trim()
     let done = 0
+    setScanError('')
     try {
-      for (const image of images) {
-        setReading(`Reading page ${done + 1} of ${images.length}... (about 10 seconds a page)`)
+      for (const image of pages) {
+        setReading(`Reading page ${done + 1} of ${pages.length}... (about 10 seconds a page)`)
         const page = (await api.readPages([image], 'notes')).text.trim()
+        if (!page) throw new Error('No text was found on that page')
         text = text ? `${text}\n\n${page}` : page
         setContent(text)
-        if (done === 0 && !title.trim()) setTitle(guessTitle(page))
+        if (!title.trim() && done === 0 && !content.trim()) setTitle(guessTitle(page))
         done++
       }
     } catch (err) {
-      setError(`${err.message}. Pages read so far were kept; try the rest again.`)
+      setScanError(`Couldn't read page ${done + 1}: ${err.message}. Pages read so far were kept.`)
     } finally {
-      setImages((prev) => prev.slice(done)) // leave only the pages that weren't read
+      setImages(pages.slice(done)) // leave only the pages that weren't read, to try again
       setReading('')
     }
   }
@@ -378,14 +381,22 @@ function AddMaterial({ user, topics, onSaved, onCancel }) {
 
       <fieldset className="scan-box" disabled={!!reading}>
         <legend>Scan your notes</legend>
-        <p className="status">Photograph each page. Clutch reads them into text you can fix up.</p>
-        <ScanPages images={images} setImages={setImages} onError={setError} />
-        {images.length > 0 && (
-          <button type="button" onClick={readNotes}>
-            Read {images.length === 1 ? 'page' : `${images.length} pages`}
+        <p className="status">
+          Photograph each page. Clutch reads it right away into text below that you can fix up.
+        </p>
+        <ScanPages
+          images={images}
+          setImages={setImages}
+          onError={setScanError}
+          onAdded={(added) => readNotes([...images, ...added])}
+        />
+        {reading && <p className="scan-progress">{reading}</p>}
+        {scanError && <p className="error">{scanError}</p>}
+        {!reading && images.length > 0 && (
+          <button type="button" onClick={() => readNotes(images)}>
+            Try reading {images.length === 1 ? 'that page' : `those ${images.length} pages`} again
           </button>
         )}
-        {reading && <p className="status">{reading}</p>}
       </fieldset>
 
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (e.g. Lecture 4 notes)" />
