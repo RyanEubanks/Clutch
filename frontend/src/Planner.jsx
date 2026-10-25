@@ -211,7 +211,7 @@ export default function Planner({ user, subjects, onStudy, onTakeQuiz }) {
                   >
                     <span className="cal-num">{Number(key.slice(8))}</span>
                     {dayEvents.slice(0, 2).map((e) => (
-                      <span key={e.id} className={`cal-pill ${e.kind}${e.done ? ' done' : ''}`}>
+                      <span key={e.id} className={`cal-pill kind-${e.kind}${e.done ? ' done' : ''}`}>
                         {e.title}
                       </span>
                     ))}
@@ -228,11 +228,11 @@ export default function Planner({ user, subjects, onStudy, onTakeQuiz }) {
             <div className="cal-legend">
               {KINDS.map(([k, label]) => (
                 <span key={k}>
-                  <span className={`legend-dot ${k}`} /> {label}
+                  <span className={`legend-dot kind-${k}`} /> {label}
                 </span>
               ))}
               <span>
-                <span className="legend-dot review" /> Reviews
+                <span className="legend-dot kind-review" /> Reviews
               </span>
             </div>
           </section>
@@ -406,7 +406,7 @@ function TestReadiness({ tests, onStudy, onEdit }) {
           <li key={t.id} className={t.at_risk ? 'test-card at-risk' : 'test-card'}>
             <div className="row">
               <div>
-                <span className={`kind-chip ${t.kind}`}>{KIND_LABEL[t.kind]}</span> <strong>{t.title}</strong>
+                <span className={`kind-chip kind-${t.kind}`}>{KIND_LABEL[t.kind]}</span> <strong>{t.title}</strong>
                 <div className="status">
                   {longDate(t.date, { weekday: 'short', month: 'short', day: 'numeric' })}
                   {t.time ? ` at ${formatTime(t.time)}` : ''} · {countdown(t.days_left)}
@@ -456,7 +456,7 @@ function EventRow({ event, today, onEdit, onToggle }) {
           aria-label={`Mark ${event.title} ${event.done ? 'not done' : 'done'}`}
         />
       ) : (
-        <span className={`legend-dot ${event.kind}`} />
+        <span className={`legend-dot kind-${event.kind}`} />
       )}
       <button className="event-title" onClick={() => onEdit(event)}>
         <span>{event.title}</span>
