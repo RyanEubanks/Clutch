@@ -74,6 +74,13 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
         <button className="link" onClick={onBack}>back to progress</button>
       </div>
 
+      {quiz.math_checker === false && (
+        <p className="error">
+          Math checking is off because SymPy isn't installed on the server, so answer keys may be
+          wrong. Run <code>pip install -r requirements.txt</code> in backend/ and restart Flask.
+        </p>
+      )}
+
       {result ? (
         <ResultBanner result={result} onRetry={onRetry} onStudy={() => onStudy(quiz.topic_id)} />
       ) : (
@@ -112,6 +119,12 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
                 )
               })}
             </div>
+            {graded && q.voided && (
+              <p className="status">This question was voided, so everyone gets credit for it.</p>
+            )}
+            {graded && q.key_set_by_hand && (
+              <p className="status">This answer key was corrected by hand.</p>
+            )}
             {graded && q.explanation && (
               <div className="explanation">
                 <Markdown>{q.explanation}</Markdown>

@@ -200,40 +200,15 @@ def get_document(conn, document_id):
     return _row(conn.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone())
 
 
-def list_documents(conn, user_id, query=None):
-    """Document metadata only (no content), for listing in the UI.
-
-    With a query, only documents whose title or content contain it (case-insensitive) are
-    returned, and content matches get a short "snippet" of text around the first hit.
-    """
-    sql = """SELECT d.id, d.user_id, d.topic_id, d.title, d.char_count, d.created_at,
-                    t.name AS topic_name, s.name AS subject_name, d.content
-             FROM documents d
-             LEFT JOIN topics t ON t.id = d.topic_id
-             LEFT JOIN subjects s ON s.id = t.subject_id
-             WHERE d.user_id = ?"""
-    params = [user_id]
-    query = (query or "").strip()
-    if query:
-        like = "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        sql += " AND (d.title LIKE ? ESCAPE '\\' OR d.content LIKE ? ESCAPE '\\')"
-        params += [like, like]
-    docs = _rows(conn.execute(sql + " ORDER BY d.created_at DESC, d.id DESC", params))
-    for doc in docs:
-        content = doc.pop("content")
-        if query:
-            doc["snippet"] = _snippet(content, query)
-    return docs
-
-
-def _snippet(content, query, radius=60):
-    """A one-line excerpt of content around the first match of query, or None."""
-    at = content.lower().find(query.lower())
-    if at < 0:
-        return None
-    start, end = max(0, at - radius), min(len(content), at + len(query) + radius)
-    text = " ".join(content[start:end].split())
-    return ("…" if start else "") + text + ("…" if end < len(content) else "")
+def list_documents(conn, user_id):
+    """Document metadata only (no content), for listing in the UI."""
+    return _rows(conn.execute(
+        """SELECT d.id, d.user_id, d.topic_id, d.title, d.char_count, d.created_at,
+                  t.name AS topic_name
+           FROM documents d LEFT JOIN topics t ON t.id = d.topic_id
+           WHERE d.user_id = ? ORDER BY d.created_at DESC, d.id DESC""",
+        (user_id,),
+    ))
 
 
 def topic_documents(conn, topic_id):
@@ -380,7 +355,8 @@ def get_quiz(conn, quiz_id):
 def submit_quiz(conn, quiz_id, answers, pass_fraction):
     """Grade a quiz and award the topic badge if it passed. Returns (quiz, new_badge)."""
     quiz = get_quiz(conn, quiz_id)
-    score = sum(1 for q, a in zip(quiz["questions"], answers) if a == q["answer"])
+    # A voided question (no correct option was offered) counts as right for everyone.
+    score = sum(1 for q, a in zip(quiz["questions"], answers) if q.get("voided") or a == q["answer"])
     passed = score >= pass_fraction * quiz["total"]
     conn.execute(
         """UPDATE quizzes SET answers_json = ?, score = ?, passed = ?, submitted_at = datetime('now')

@@ -104,6 +104,7 @@ READ_PROMPT = """Transcribe the homework problems in this image exactly as writt
 - Do not solve anything or add comments.
 - If part of the page is unreadable, write [unclear] there."""
 
+<<<<<<< Updated upstream
 NOTES_READ_PROMPT = """Transcribe the notes in this image exactly as written, in Markdown.
 - Keep the structure: titles and section names as headings (# or ##), lists as bullet points, \
 numbered steps and problems as numbered lists.
@@ -161,6 +162,8 @@ def split_transcript(text, max_chars):
             current = f"{current}\n\n{piece}" if current else piece
     return parts + [current] if current else parts
 
+=======
+>>>>>>> Stashed changes
 STUDY_GUIDE_PROMPT = """Make a study guide for the material in this homework. Use Markdown \
 with these sections:
 
@@ -203,8 +206,9 @@ Topic: {topic}
 {description}{material}
 There are two kinds of question.
 
-1. MATH: any question with a calculation (derivatives, integrals, limits, solving equations,
-evaluating or simplifying expressions). Do NOT write question text for these. Describe the task
+1. MATH: any question with a calculation, including plain arithmetic like 45 + 23
+(derivatives, integrals, limits, solving equations, arithmetic, evaluating or simplifying
+expressions). Do NOT write question text for these. Describe the task
 so a computer can check it, like this:
 {"op": "diff", "expr": "(3*x+1)**4", "var": "x", "options": ["12*(3*x+1)**3", "4*(3*x+1)**3", \
 "12*x*(3*x+1)**3", "(3*x+1)**3"], "answer": 0, "explanation": "Chain rule: 4(3x+1)^3 times 3."}
@@ -214,7 +218,8 @@ so a computer can check it, like this:
 - "integrate": indefinite integral of expr
 - "definite": integral of expr from "lower" to "upper" (add those two fields)
 - "limit": limit of expr as var approaches "at" (add the "at" field)
-- "evaluate": the value of expr, at var = "at" if you add an "at" field
+- "evaluate": the value of expr, at var = "at" if you add an "at" field. Use this for
+  arithmetic: {"op": "evaluate", "expr": "45 + 23", "options": ["68", "78", "58", "67"], "answer": 0}
 - "simplify": which option is equivalent to expr
 - "solve": solve the equation in expr, e.g. "x**2 - 4 = 0"; options look like "x = 2, x = -2"
 Write expr and EVERY option in Python/SymPy syntax: * to multiply, ** for powers, sqrt(), exp(),
@@ -352,8 +357,16 @@ def quiz_questions_from(text, report=None):
     checked = mathcheck.check_questions(math_items) if (mathcheck and math_items) else []
     math_results = iter(checked)
 
+    # Plain-text questions with number options ("What is 12 + 7?") often hide arithmetic:
+    # check those too, when the question spells the arithmetic out.
+    concepts = {i: parse_concept(q) for i, q in enumerate(items) if not q.get("op")}
+    numeric = {i: c for i, c in concepts.items() if c and c["numeric"]}
+    arith = (mathcheck.check_questions(list(numeric.values()), arithmetic=True)
+             if (mathcheck and numeric) else [])
+    arith_results = dict(zip(numeric, arith))
+
     questions = []
-    for q in items:
+    for i, q in enumerate(items):
         if q.get("op"):
             result, error = next(math_results, (None, "sympy not installed"))
             if result:
@@ -363,10 +376,17 @@ def quiz_questions_from(text, report=None):
             else:
                 note(kind="math", op=q.get("op"), raw=q, status="dropped", error=error)
             continue
-        concept = parse_concept(q)
-        if concept:
+        concept = concepts[i]
+        result, error = arith_results.get(i, (None, None))
+        if result:
+            result["numeric"] = True
+            questions.append(shuffle_options(result))
+            note(kind="math", op="arithmetic (in question text)", raw=q,
+                 status="corrected" if result["corrected"] else "checked", result=result)
+        elif concept:
             questions.append(shuffle_options(concept))
-            note(kind="concept", raw=q, status="unchecked", result=concept)
+            note(kind="concept", raw=q, status="unchecked", result=concept,
+                 error=error if concept["numeric"] else None)
         else:
             note(kind="concept", raw=q, status="dropped", error="not 4 distinct options with a valid answer")
     return questions
@@ -401,12 +421,21 @@ def parse_concept(q):
         "answer": answer,
         "explanation": str(q.get("explanation") or "").strip(),
         "verified": False,
+        # Number answers are where small models slip most, so unchecked ones rank last.
+        "numeric": numeric_options(options),
     }
+
+
+def numeric_options(options):
+    """True if every option is a plain number like '7', '3/4' or '13 apples'."""
+    return all(re.fullmatch(r"\$?\s*-?[\d.,/\s]+\$?(\s+[A-Za-z]+){0,2}\.?", str(o).strip())
+               for o in options)
 
 
 def public_quiz(quiz):
     """Hide answers and explanations until the quiz has been submitted."""
-    quiz = {**quiz, "needed": math.ceil(QUIZ_PASS_FRACTION * quiz["total"] - 1e-9)}
+    quiz = {**quiz, "needed": math.ceil(QUIZ_PASS_FRACTION * quiz["total"] - 1e-9),
+            "math_checker": mathcheck is not None}
     if quiz["submitted_at"] is None:
         quiz = {**quiz, "questions": [
             {"question": q["question"], "options": q["options"], "verified": q.get("verified", False)}
@@ -453,7 +482,7 @@ def create_app(db_path=None):
 
     @app.get("/api/health")
     def health():
-        return jsonify(status="ok", model=MODEL)
+        return jsonify(status="ok", model=MODEL, math_checker=mathcheck is not None)
 
     @app.post("/api/chat")
     def chat():
@@ -473,16 +502,10 @@ def create_app(db_path=None):
 
     @app.post("/api/homework/read")
     def read_homework():
-        """Turn photos of homework or notes (base64 data URLs) into text the student can edit.
-
-        Body: {"images": [...], "kind": "homework" | "notes"}  (kind defaults to homework)
-        """
+        """Turn photos of homework (base64 data URLs) into text the student can check and edit."""
         images = body().get("images", [])
         if not images:
             return jsonify(error="images is required"), 400
-        prompt = READ_PROMPTS.get(body().get("kind") or "homework")
-        if not prompt:
-            return jsonify(error="kind must be homework or notes"), 400
 
         pages = []
         try:
@@ -493,7 +516,7 @@ def create_app(db_path=None):
                         "role": "user",
                         "content": [
                             {"type": "image_url", "image_url": {"url": image}},
-                            {"type": "text", "text": prompt},
+                            {"type": "text", "text": READ_PROMPT},
                         ],
                     }],
                     temperature=0,
@@ -742,8 +765,7 @@ def create_app(db_path=None):
 
     @app.get("/api/users/<int:user_id>/documents")
     def list_documents(user_id):
-        """Optional ?q= searches titles and content."""
-        return jsonify(db.list_documents(get_db(), user_id, request.args.get("q")))
+        return jsonify(db.list_documents(get_db(), user_id))
 
     @app.post("/api/users/<int:user_id>/documents")
     def create_document(user_id):
@@ -828,8 +850,8 @@ def create_app(db_path=None):
                     break
         except Exception as exc:
             return jsonify(error=f"Model request failed: {exc}"), 502
-        # Prefer questions the math engine verified, keeping the model's order otherwise.
-        questions.sort(key=lambda q: not q["verified"])
+        # Prefer questions the math engine verified; unchecked number questions go last.
+        questions.sort(key=lambda q: 0 if q["verified"] else (2 if q.get("numeric") else 1))
         questions = questions[:QUIZ_QUESTIONS]
         if len(questions) < QUIZ_QUESTIONS:
             return jsonify(error="Mother Hen couldn't write a quiz this time. Please try again."), 502

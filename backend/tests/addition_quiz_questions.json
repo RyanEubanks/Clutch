@@ -1,0 +1,155 @@
+{
+ "source": "Real gemma4:e2b quiz questions for the topic 'Addition' (Oct 25, 2026), copied from a local clutch.db. Several answer keys are wrong.",
+ "questions": [
+  {
+   "question": "What is the sum of 5 and 3?",
+   "options": [
+    "7",
+    "6",
+    "8",
+    "9"
+   ],
+   "answer": 0
+  },
+  {
+   "question": "Calculate the total: $45 + 23$.",
+   "options": [
+    "78",
+    "67",
+    "77",
+    "68"
+   ],
+   "answer": 0
+  },
+  {
+   "question": "If you have 12 apples and you get 5 more, how many apples do you have in total?",
+   "options": [
+    "16",
+    "15",
+    "18",
+    "17"
+   ],
+   "answer": 3
+  },
+  {
+   "question": "Solve for the missing number: $8 + \text{?} = 15$.",
+   "options": [
+    "8",
+    "9",
+    "6",
+    "7"
+   ],
+   "answer": 3
+  },
+  {
+   "question": "What is the result of $38 + 14$?",
+   "options": [
+    "52",
+    "42",
+    "50",
+    "54"
+   ],
+   "answer": 3
+  },
+  {
+   "question": "What is the meaning of the '+' symbol in addition?",
+   "options": [
+    "Subtraction",
+    "Joining or combining quantities",
+    "Division",
+    "Multiplication"
+   ],
+   "answer": 1
+  },
+  {
+   "question": "What is the primary purpose of addition in mathematics?",
+   "options": [
+    "To multiply numbers together.",
+    "To find the difference between two numbers.",
+    "To combine two or more quantities to find their total.",
+    "To subtract numbers."
+   ],
+   "answer": 2
+  },
+  {
+   "question": "Calculate the sum of 5 and 3.",
+   "options": [
+    "10",
+    "9",
+    "7",
+    "8"
+   ],
+   "answer": 1
+  },
+  {
+   "question": "What is the result of 12 + 7?",
+   "options": [
+    "19",
+    "21",
+    "18",
+    "20"
+   ],
+   "answer": 1
+  },
+  {
+   "question": "Which property of addition states that changing the order of the numbers does not change the sum (e.g., a + b = b + a)?",
+   "options": [
+    "Commutative Property",
+    "Associative Property",
+    "Identity Property",
+    "Distributive Property"
+   ],
+   "answer": 0
+  },
+  {
+   "question": "What is the basic concept of addition?",
+   "options": [
+    "Multiplication",
+    "Combining two or more quantities",
+    "Division",
+    "Subtraction"
+   ],
+   "answer": 1
+  },
+  {
+   "question": "Which property of addition states that changing the order of the numbers does not change the sum?",
+   "options": [
+    "Inverse Property",
+    "Commutative Property",
+    "Identity Property",
+    "Associative Property"
+   ],
+   "answer": 1
+  },
+  {
+   "question": "If you have 3 apples and you buy 2 more apples, how many apples do you have in total?",
+   "options": [
+    "7",
+    "8",
+    "5",
+    "6"
+   ],
+   "answer": 3
+  },
+  {
+   "question": "What is the sum of 5 and 3?",
+   "options": [
+    "10",
+    "7",
+    "9",
+    "8"
+   ],
+   "answer": 2
+  },
+  {
+   "question": "Which property of addition states that the order does not matter?",
+   "options": [
+    "Identity Property",
+    "Inverse Property",
+    "Associative Property",
+    "Commutative Property"
+   ],
+   "answer": 3
+  }
+ ]
+}

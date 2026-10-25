@@ -187,6 +187,15 @@ def tex(expr):
     return sp.latex(expr)
 
 
+def tex_as_written(text):
+    """LaTeX for an expression in the order it was written, without simplifying it.
+
+    Plain-number products use a times sign: "(3+4)*2" -> (3 + 4) \\times 2, not "(3 + 4) 2".
+    """
+    expr = parse(text, evaluate=False)
+    return sp.latex(expr, order="none", mul_symbol="times" if not expr.free_symbols else None)
+
+
 def var_of(task, expr):
     name = str(task.get("var") or "").strip()
     if name:
@@ -256,12 +265,14 @@ def build(task):
         return question, truth, parse, same_number, render
 
     if op == "evaluate":
+        # Show the expression as written: evaluated, "45 + 23" would display as "68".
+        shown = tex_as_written(task.get("expr"))
         if task.get("at") not in (None, ""):
             at = parse(task.get("at"))
-            question = f"Evaluate ${tex(expr)}$ at ${tex(x)} = {tex(at)}$."
+            question = f"Evaluate ${shown}$ at ${tex(x)} = {tex(at)}$."
             truth = expr.subs(x, at)
         else:
-            question = f"Evaluate ${tex(expr)}$."
+            question = f"Evaluate ${shown}$."
             truth = expr
         truth = sp.simplify(truth)
         if not truth.is_number:
@@ -269,7 +280,7 @@ def build(task):
         return question, truth, parse, same_number, render
 
     # simplify: which option is equivalent to the expression? Show it as written.
-    question = f"Which expression is equivalent to ${tex(parse(task.get('expr'), evaluate=False))}$?"
+    question = f"Which expression is equivalent to ${tex_as_written(task.get('expr'))}$?"
     return question, expr, parse, equivalent, render
 
 
@@ -325,6 +336,155 @@ def check_question(q):
     }
 
 
+# ---------- arithmetic written as a plain-text question ----------
+# Small models often write "What is 12 + 7?" as an ordinary question with number options
+# instead of a checkable task. These helpers find the arithmetic in the question text.
+
+NUMBER = r"-?\d+(?:\.\d+)?"
+WORD_OPS = [
+    (rf"\b(?:sum|total) of ({NUMBER}) and ({NUMBER})", "({0}) + ({1})"),
+    (rf"\badd ({NUMBER}) (?:and|to) ({NUMBER})", "({0}) + ({1})"),
+    (rf"\bproduct of ({NUMBER}) and ({NUMBER})", "({0}) * ({1})"),
+    (rf"\bdifference (?:between|of) ({NUMBER}) and ({NUMBER})", "({0}) - ({1})"),
+    (rf"\bsubtract ({NUMBER}) from ({NUMBER})", "({1}) - ({0})"),
+    (rf"\bquotient of ({NUMBER}) and ({NUMBER})", "({0}) / ({1})"),
+    (rf"\b({NUMBER}) (?:plus|added to) ({NUMBER})", "({0}) + ({1})"),
+    (rf"\b({NUMBER}) minus ({NUMBER})", "({0}) - ({1})"),
+    (rf"\b({NUMBER}) times ({NUMBER})", "({0}) * ({1})"),
+    (rf"\b({NUMBER}) divided by ({NUMBER})", "({0}) / ({1})"),
+]
+# A run of numbers joined by + - * / ^ (and parentheses), e.g. "45 + 23" or "(3 + 4) * 2".
+ARITH = re.compile(r"[\d(][\d\s.()+\-*/^?]*[+\-*/^][\d\s.()+\-*/^?]*[\d)?]")
+BLANKS = re.compile(r"\\text\{\s*\?\s*\}|\\square|\\_+|_{2,}|\?|□|\[\s*\]")
+
+
+def _plain_math(text):
+    """Turn LaTeX-ish question text into plain arithmetic symbols."""
+    text = str(text).replace("\t" + "ext{", "\\text{")  # "\text" mangled into tab + "ext" by JSON
+    text = text.replace("$", " ")
+    for old, new in (("\\times", "*"), ("\\cdot", "*"), ("\\div", "/"), ("×", "*"),
+                     ("÷", "/"), ("−", "-"), ("\\left", ""), ("\\right", ""), (",", "")):
+        text = text.replace(old, new)
+    text = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"((\1)/(\2))", text)
+    return BLANKS.sub("?", text)
+
+
+# One side of a simple equation: numbers, operators, and lone single letters (x, n, ...).
+EQ_SIDE = r"((?:[\d.()+\-*/^\s?]|(?<![A-Za-z])[a-df-z](?![A-Za-z]))+)"
+EQUATION = re.compile(EQ_SIDE + "=" + EQ_SIDE)
+
+
+def find_arithmetic(question):
+    """The single arithmetic task in a question, as (kind, expression text), or None.
+
+    kind is "value" (compute it) or "blank" (solve "8 + ? = 15" or "7 + x = 12" for
+    the one unknown; the unknown is rewritten as "?").
+    """
+    text = _plain_math(question)
+    for eq in EQUATION.finditer(text):
+        lhs, rhs = (side.strip().strip(".;:").strip() for side in eq.groups())
+        both = f"{lhs} = {rhs}"
+        letters = set(re.findall(r"[a-z]", both))
+        unknowns = both.count("?") + len(letters)
+        if not lhs or not rhs or not re.search(r"\d", both) or unknowns == 0:
+            continue
+        if both.count("?") == 1 and not letters:
+            return "blank", both
+        if not both.count("?") and len(letters) == 1:
+            return "blank", re.sub(r"[a-z]", "?", both)
+    low = text.lower()
+    found = {tmpl.format(*m.groups()) for pattern, tmpl in WORD_OPS for m in re.finditer(pattern, low)}
+    for m in ARITH.finditer(text):
+        candidate = m.group(0).strip().rstrip("?.;: ").strip()
+        if "?" in candidate or re.search(r"\d{4}-\d{1,2}", candidate):  # blanks, or dates
+            continue
+        found.add(candidate)
+    found = {f for f in found if re.search(r"\d", f)}
+    if len(found) != 1:
+        return None  # nothing, or more than one candidate: too ambiguous to check
+    return "value", found.pop()
+
+
+NUMBER_OPTION = re.compile(
+    r"\$?\s*(?:[a-df-z]\s*=\s*)?(-?\d+(?:\.\d+)?(?:\s*/\s*\d+)?)\s*\$?(?:\s+[A-Za-z]+){0,2}\s*\.?")
+
+
+def _number_option(text):
+    """'8', '-3.5', '3/4', '$12$', 'x = 5' or '17 apples' -> a number. Anything else is refused."""
+    match = NUMBER_OPTION.fullmatch(str(text).strip())
+    if not match:
+        raise MathError(f"option is not a plain number: {text!r}")
+    return parse(match.group(1))
+
+
+def check_arithmetic(q):
+    """Verify a plain-text question whose options are numbers and whose text contains one
+    explicit arithmetic task. Returns a question dict like check_question, or raises MathError
+    (meaning: leave the question unchecked)."""
+    raw_options = q.get("options") or []
+    if len(raw_options) != 4:
+        raise MathError("need exactly 4 options")
+    options = [_number_option(o) for o in raw_options]
+    task = find_arithmetic(q.get("question") or "")
+    if task is None:
+        raise MathError("no single arithmetic expression in the question")
+    kind, text = task
+    if kind == "blank":
+        lhs, rhs = text.replace("?", "b").split("=")
+        blank = VARS["b"]
+        solutions = sp.solve(parse(lhs) - parse(rhs), blank)
+        if len(solutions) != 1:
+            raise MathError("the blank doesn't have exactly one answer")
+        truth = solutions[0]
+    else:
+        truth = parse(text)
+    truth = sp.nsimplify(truth) if truth.is_number else truth
+    if not truth.is_number:
+        raise MathError("not a number")
+
+    claimed = q.get("answer") if isinstance(q.get("answer"), int) else None
+    right = [i for i, o in enumerate(options) if same_number(o, truth)]
+    if len(right) > 1:
+        raise MathError("more than one option is correct")
+    for i in range(4):
+        for j in range(i + 1, 4):
+            if same_number(options[i], options[j]):
+                raise MathError("two options are the same")
+    shown = [str(o).strip() for o in raw_options]
+    if right:
+        answer = right[0]
+    else:
+        answer = claimed if claimed is not None and 0 <= claimed < 4 else 0
+        shown[answer] = str(truth) if truth.is_Integer else f"${tex(truth)}$"
+    corrected = answer != claimed or not right
+    model_said = shown_text = None
+    if corrected and claimed is not None and 0 <= claimed < 4:
+        model_said = str(raw_options[claimed]).strip()
+    explanation = str(q.get("explanation") or "").strip()
+    if corrected or not explanation:
+        shown_text = shown[answer]
+        explanation = (f"Mother Hen double-checked this with a math engine: "
+                       f"the correct answer is {shown_text}.")
+    return {
+        "question": q.get("question"),
+        "options": shown,
+        "answer": answer,
+        "explanation": explanation,
+        "verified": True,
+        "corrected": corrected,
+        "model_said": model_said,
+    }
+
+
+def _check_arithmetic_safely(q):
+    try:
+        return check_arithmetic(q), None
+    except MathError as exc:
+        return None, str(exc)
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 def _safe(same, a, b):
     try:
         return bool(same(a, b))
@@ -364,11 +524,16 @@ def _reset_pool():
         _pool = None
 
 
-def check_questions(questions, timeout=None):
-    """Check many questions in worker processes. Returns [(result or None, error or None)]."""
+def check_questions(questions, timeout=None, arithmetic=False):
+    """Check many questions in worker processes. Returns [(result or None, error or None)].
+
+    arithmetic=True checks plain-text questions with number options (check_arithmetic)
+    instead of task-style math questions (check_question).
+    """
     timeout = CHECK_TIMEOUT if timeout is None else timeout
     pool = _get_pool()
-    futures = [pool.submit(_check_safely, q) for q in questions]
+    worker = _check_arithmetic_safely if arithmetic else _check_safely
+    futures = [pool.submit(worker, q) for q in questions]
     results = []
     timed_out = False
     for f in futures:

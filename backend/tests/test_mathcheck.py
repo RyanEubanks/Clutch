@@ -130,3 +130,39 @@ def test_bars_mean_absolute_value():
     assert r["answer"] == 0 and not r["corrected"]
     with pytest.raises(m.MathError):
         m.parse("|x")  # unmatched bar is still refused
+
+
+def test_evaluate_shows_the_expression_not_the_answer():
+    r = check(op="evaluate", expr="45 + 23", options=["68", "78", "58", "67"], answer=1)
+    assert r["question"] == "Evaluate $45 + 23$."  # not "Evaluate $68$."
+    assert r["options"][r["answer"]] == "$68$" and r["corrected"] is True
+
+
+@pytest.mark.parametrize("question, options, claimed, expected", [
+    ("What is the sum of 5 and 3?", ["7", "6", "8", "9"], 0, "8"),
+    ("Calculate the total: $45 + 23$.", ["78", "67", "77", "68"], 0, "68"),
+    ("Solve for the missing number: $8 + \text{?} = 15$.", ["8", "9", "6", "7"], 3, "7"),
+    ("What is 2 + 2 × 3?", ["12", "8", "10", "6"], 0, "8"),
+    ("What is 15 minus 6?", ["9 apples", "8 apples", "21 apples", "10 apples"], 1, "9 apples"),
+    ("What is $7 \\times 6$?", ["42", "36", "48", "13"], 1, "42"),
+    ("What is the product of 4 and 5?", ["9", "20", "1", "45"], 0, "20"),
+    ("Solve for x: 7 + x = 12.", ["x = 6", "x = 5", "x = 8", "x = 4"], 0, "x = 5"),
+    ("If 3n = 21, what is n?", ["6", "7", "8", "9"], 1, "7"),
+])
+def test_arithmetic_in_question_text_is_checked(question, options, claimed, expected):
+    r = m.check_arithmetic({"question": question, "options": options, "answer": claimed})
+    assert r["options"][r["answer"]] == expected
+    assert r["corrected"] == (options[claimed] != expected)
+
+
+@pytest.mark.parametrize("question, options", [
+    ("If you have 12 apples and you get 5 more, how many apples do you have?", ["16", "15", "18", "17"]),
+    ("What year did World War II end?", ["1945", "1939", "1918", "1950"]),
+    ("What is 7 - 2 and then 3 + 1?", ["5", "4", "9", "1"]),  # two calculations: ambiguous
+    ("Which is equivalent to x + 3?", ["x + 3", "3x", "x - 3", "3"]),  # not number options
+    ("What is $\\frac{3}{4} + \\frac{1}{4}$?", ["1", "4/8", "1/2", "2"]),  # 4/8 == 1/2
+    ("If x + y = 10, what is x?", ["5", "10", "0", "2"]),  # two unknowns
+])
+def test_arithmetic_check_leaves_unclear_questions_alone(question, options):
+    with pytest.raises(m.MathError):
+        m.check_arithmetic({"question": question, "options": options, "answer": 0})

@@ -39,6 +39,15 @@ CONTENTS
  1. OPEN ISSUES AND WATCH-OUTS
 ================================================================================
 
+[OPEN-07] Arithmetic word problems still can't be checked
+  Date:      Oct 25, 2026
+  Note:      "If you have 12 apples and get 5 more, how many?" has no written-out
+             arithmetic to check, so it stays unchecked. Unchecked number
+             questions are ranked last and only used when there aren't enough
+             checked ones. Guessing the arithmetic from the words could "fix" a
+             key that was right, so it isn't attempted.
+  Files:     backend/mathcheck.py (find_arithmetic), backend/app.py
+
 [OPEN-06] The math checker hasn't been run against the real Gemma yet
   Date:      Oct 25, 2026
   Note:      All checker tests use a fake model. Run the real-model eval to see
@@ -103,6 +112,30 @@ CONTENTS
 ================================================================================
  2. CAUGHT BY TESTS AND TEST RUNS
 ================================================================================
+
+[TEST-09] Blank-filling question failed on its trailing period and "\t"
+  Date:      Oct 25, 2026
+  Found by:  replaying the real Addition quiz (tests/addition_quiz_questions.json)
+  Symptom:   "Solve for the missing number: $8 + \text{?} = 15$." couldn't be
+             parsed ("15 ." is invalid).
+  Cause:     The sentence's final period was captured as part of the equation.
+             Also, Gemma wrote "\text" inside JSON, where "\t" means a tab, so it
+             was stored as a tab followed by "ext{?}".
+  Fix:       Trim trailing punctuation from each side, and turn tab + "ext{" back
+             into "\text{" before reading the question.
+  Files:     backend/mathcheck.py
+
+[TEST-08] "Evaluate" questions would show their own answer
+  Date:      Oct 25, 2026
+  Found by:  code review, then test_mathcheck.py::test_evaluate_shows_the_expression_not_the_answer
+  Symptom:   op "evaluate" with expr "45 + 23" displayed "Evaluate $68$." Then,
+             once shown unevaluated, SymPy reordered it to "23 + 45" and wrote
+             (3+4)*2 as "(3 + 4) 2".
+  Cause:     Parsing evaluates numbers right away; SymPy's LaTeX sorts terms and
+             writes number products by juxtaposition.
+  Fix:       tex_as_written(): parse without evaluating, keep the original term
+             order, and use a times sign between plain numbers.
+  Files:     backend/mathcheck.py
 
 [TEST-07] Showing questions "as written" crashed with NameError: 'Pow'
   Date:      Oct 25, 2026
@@ -246,6 +279,51 @@ CONTENTS
  4. MODEL MISTAKES CAUGHT
 ================================================================================
 
+[MODEL-05] Wrong keys graded right answers as wrong (5 Addition quizzes regraded)
+  Date:      Oct 25, 2026
+  Found by:  hand checking quiz results; quizzes 4-5 were written at 1:03 am,
+             a few minutes before SymPy was installed (1:07-1:09), so the
+             checker was still off ([ENV-05])
+  Symptom:   The student's answers were right, but bad keys scored the quizzes
+             2-3/5, so no badge.
+  Fix:       backend/regrade_quizzes.py re-checks saved quizzes, fixes keys,
+             rescores from the answers actually given, and awards badges. Run on
+             Oct 25: 13 keys fixed by the checker, 2 word problems fixed by hand
+             (--set 3:3=C for 3 + 2 = 5, --set 4:5=C for 8 + 5 = 13), 1 word
+             problem confirmed by hand (12 + 5 = 17). All 5 quizzes went to
+             5/5 and the Addition badge was awarded, dated to quiz 1.
+             Backup of the database from before: user_data/clutch-backup-20261025-011300.db
+             Also: "Solve for x: 7 + x = 12" with options like "x = 5" is now
+             checked.
+  Usage:     cd backend; python regrade_quizzes.py           (preview)
+                         python regrade_quizzes.py --apply   (backup + save)
+                         python regrade_quizzes.py --set QUIZ:QUESTION=LETTER
+             Submitted questions with no correct option are voided (everyone
+             gets credit). Badges are never taken away.
+  Files:     backend/regrade_quizzes.py, backend/mathcheck.py, backend/db.py,
+             frontend/src/Quiz.jsx
+
+[MODEL-04] Addition quizzes had wrong answer keys, even after the checker
+  Date:      Oct 25, 2026
+  Found by:  hand testing; then reading the 3 Addition quizzes in clutch.db
+  Symptom:   Keys like 45 + 23 = 78, 38 + 14 = 54, 12 + 7 = 21, and "sum of 5 and
+             3" = 7 or 9. 6 of 15 questions had a wrong key.
+  Cause:     Three things at once:
+               1. Quiz 1 was made before the checker existed.
+               2. SymPy wasn't installed in backend/.venv, so the checker was
+                  off and every checkable question was silently dropped (see
+                  [ENV-05]).
+               3. Gemma wrote arithmetic as plain-text questions ("What is
+                  12 + 7?"), which the checker didn't look at.
+  Fix:       Plain-text questions with number options are now checked when the
+             question spells the arithmetic out ("12 + 7", "sum of 5 and 3",
+             "8 + ? = 15", "15 minus 6", "7 \times 6"). Replaying the real quiz:
+             6 wrong keys fixed, 1 confirmed, 2 word problems left unchecked
+             ([OPEN-07]). The prompt also tells the model to write arithmetic as
+             op "evaluate". Those 15 questions are kept as a test fixture.
+  Files:     backend/mathcheck.py, backend/app.py,
+             backend/tests/addition_quiz_questions.json
+
 [MODEL-03] Wrong quiz answer keys (now caught by the SymPy checker)
   Date:      Oct 25, 2026
   Found by:  hand testing, then backend/mathcheck.py
@@ -291,6 +369,17 @@ CONTENTS
 ================================================================================
  5. ENVIRONMENT AND TOOLING
 ================================================================================
+
+[ENV-05] SymPy missing from the venv turns the checker off
+  Date:      Oct 25, 2026
+  Found by:  checking backend/.venv after bad Addition quizzes ([MODEL-04])
+  Symptom:   Quizzes came back all unchecked; the only sign was a warning in
+             the Flask terminal.
+  Fix:       Install it: cd backend; pip install -r requirements.txt; restart
+             Flask. The app now also says so: /api/health reports
+             "math_checker": false, and the quiz page shows a red warning.
+  Note:      An unsubmitted quiz is reused when a student comes back to it, so a
+             quiz written before a fix keeps its old questions until submitted.
 
 [ENV-04] After every pull: reinstall packages
   Python:    cd backend; pip install -r requirements.txt
@@ -379,3 +468,9 @@ CONTENTS
                                                         [TEST-06], [TEST-07];
                                                         eval dry run with a fake
                                                         model OK
+  Oct 25  Arithmetic checking ([MODEL-04])              48 pass after [TEST-08],
+                                                        [TEST-09]; real Addition
+                                                        quiz replay: 6/6 wrong
+                                                        keys fixed
+  Oct 25  Regrade script ([MODEL-05])                   53 pass; real database
+                                                        regraded, integrity ok

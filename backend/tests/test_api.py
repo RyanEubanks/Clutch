@@ -73,30 +73,6 @@ def test_topic_documents_go_into_the_prompt(client, model):
     assert "Lecture 4" in model.calls[-1]["messages"][0]["content"]
 
 
-def test_document_search_and_grouping_fields(client, model):
-    user, _, topic = setup_topic(client)
-    url = f"/api/users/{user['id']}/documents"
-    client.post(url, json={"title": "Lecture 4", "content": "Intro.\nThe chain rule: f'(g(x)) g'(x)",
-                           "topic_id": topic["id"]})
-    client.post(url, json={"title": "Chain rule worksheet", "content": "1. Differentiate sin(5x)"})
-    client.post(url, json={"title": "Limits", "content": "100% of 0/0 forms need work"})
-
-    docs = client.get(url).get_json()
-    assert len(docs) == 3 and all("snippet" not in d and "content" not in d for d in docs)
-    lecture = next(d for d in docs if d["title"] == "Lecture 4")
-    assert lecture["subject_name"] == "Calculus" and lecture["topic_name"] == "Chain rule"
-
-    # Title and content matches, case-insensitive; content hits come with a snippet
-    hits = {d["title"]: d for d in client.get(url, query_string={"q": "CHAIN RULE"}).get_json()}
-    assert set(hits) == {"Lecture 4", "Chain rule worksheet"}
-    assert "chain rule" in hits["Lecture 4"]["snippet"].lower()
-    assert hits["Chain rule worksheet"]["snippet"] is None
-
-    # LIKE wildcards in the query are treated as plain text
-    assert [d["title"] for d in client.get(url, query_string={"q": "100%"}).get_json()] == ["Limits"]
-    assert client.get(url, query_string={"q": "_"}).get_json() == []
-
-
 def test_document_budget_is_respected(client, model, monkeypatch):
     monkeypatch.setattr(app_module, "DOC_CHAR_BUDGET", 50)
     user, _, topic = setup_topic(client)
@@ -439,3 +415,46 @@ def test_quiz_report_explains_every_question():
     bad = []
     assert app_module.quiz_questions_from("not json", report=bad) == []
     assert bad[0]["status"] == "bad_json"
+
+
+def test_real_addition_quiz_keys_get_fixed():
+    """Replay the 15 real (and partly wrong) questions Gemma wrote for 'Addition'."""
+    from pathlib import Path
+    data = json.loads((Path(__file__).parent / "addition_quiz_questions.json").read_text())
+    report = []
+    questions = app_module.quiz_questions_from(json.dumps({"questions": data["questions"]}), report=report)
+    assert len(questions) == 15
+    fixed = [e for e in report if e["status"] == "corrected"]
+    assert len(fixed) == 6
+    for e in fixed + [e for e in report if e["status"] == "checked"]:
+        q = e["result"]
+        assert q["verified"] is True
+    keys = {e["raw"]["question"]: e["result"]["options"][e["result"]["answer"]]
+            for e in report if e["status"] in ("checked", "corrected")}
+    assert keys["Calculate the total: $45 + 23$."] == "68"
+    assert keys["What is the result of 12 + 7?"] == "19"
+    assert keys["What is the result of $38 + 14$?"] == "52"
+    # The word problems can't be checked; they stay unchecked and are flagged as numeric.
+    word = [e for e in report if e["status"] == "unchecked" and "apples" in e["raw"]["question"]]
+    assert len(word) == 2 and all(e["result"]["numeric"] for e in word)
+
+
+def test_checked_questions_first_unchecked_numbers_last(client, model):
+    _, topic, _ = master_topic(client, model)
+    model.review = json.dumps({"questions": [
+        {"question": "If you have 3 apples and buy 2 more, how many?", "options": ["7", "8", "5", "6"], "answer": 3},
+        {"question": "What is addition?", "options": ["Combining", "Splitting", "Sharing", "Halving"], "answer": 0},
+        {"question": "What is 12 + 7?", "options": ["19", "21", "18", "20"], "answer": 1},
+        {"op": "evaluate", "expr": "45 + 23", "options": ["68", "78", "58", "67"], "answer": 0},
+        {"question": "What is the commutative property?", "options": ["a+b=b+a", "a+0=a", "a(b+c)=ab+ac", "a-a=0"], "answer": 0},
+        {"question": "What is the sum of 5 and 3?", "options": ["7", "6", "8", "9"], "answer": 0},
+        {"question": "If you have 12 apples and get 5 more, how many?", "options": ["16", "15", "18", "17"], "answer": 3},
+    ]})
+    quiz = client.post(f"/api/topics/{topic['id']}/quiz").get_json()
+    assert quiz["math_checker"] is True
+    assert [q["verified"] for q in quiz["questions"]] == [True, True, True, False, False]
+    assert not any("apples" in q["question"] for q in quiz["questions"])  # unchecked numbers dropped first
+
+
+def test_health_reports_math_checker(client):
+    assert client.get("/api/health").get_json()["math_checker"] is True
