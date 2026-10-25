@@ -13,6 +13,7 @@ const CHECKED = {
   english: ['word-list checked', "Checked against Clutch's lists of irregular English words."],
   facts: ['from the fact bank', "This question comes from Clutch's fact bank, so its answer is right."],
   notes: ['checked against your notes', 'The answer was checked against a sentence in your own notes.'],
+  textbook: ['from the textbook', 'This question and its answer key come from a free OpenStax textbook.'],
 }
 
 // A mastery quiz for one topic. Passing earns the topic's badge.
@@ -135,7 +136,16 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
             {graded && q.key_set_by_hand && (
               <p className="status">This answer key was corrected by hand.</p>
             )}
-            {graded && q.source && (
+            {graded && q.source && q.checked_by === 'textbook' && (
+              <p className="source">
+                📖 {q.source} ·{' '}
+                <a href={q.source_url} target="_blank" rel="noreferrer">
+                  read it free
+                </a>{' '}
+                · {q.source_license}
+              </p>
+            )}
+            {graded && q.source && q.checked_by !== 'textbook' && (
               <blockquote className="source">
                 From your notes: “{q.source}”
               </blockquote>

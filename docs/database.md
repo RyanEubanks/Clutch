@@ -107,6 +107,8 @@ what is and isn't checked (`checks`, `not_checked`):
 - **Not verified**: Biology, French, Programming, Economics, Psychology, and custom courses.
 
 Any course's quiz questions can also be checked against the student's own notes.
+Importing a course's OpenStax textbook (below) adds its review questions and glossary, so a
+not-verified course (Biology, Economics, Psychology, Programming) becomes partly verified.
 
 ### How answers are checked
 
@@ -118,6 +120,7 @@ Any course's quiz questions can also be checked against the student's own notes.
 | Language | `langcheck.py` | Spanish present-tense conjugations, English irregular verbs and plurals | tables; words not in the tables are left unchecked, never guessed |
 | Fact bank | `factbank.py` | state and world capitals, presidents 1-45, amendments, Congress and the branches, key dates | questions are generated from the facts, so they're right by construction |
 | Notes | `groundcheck.py` | any course with notes in Materials | the model must quote the sentence its answer comes from; the quote must be in the notes and support the keyed option |
+| Textbook | `textbooks.py` | courses with an imported OpenStax book | the book's own multiple-choice review questions (official answer keys) and glossary terms; right by construction |
 
 In every case the app writes the question text from what it checked, fixes a wrong key,
 and drops questions it can't verify. Quizzes use checked questions first; each question
@@ -130,6 +133,48 @@ To verify a new course: add a checker (or facts) for its answer types, add tests
 
 Existing courses whose name exactly matches a standard course are linked on startup; others can
 be linked with "find a matching course" (`PATCH /api/subjects/<id>`), keeping their own name.
+
+## Textbooks (OpenStax)
+
+Free OpenStax textbooks can be imported with `python import_openstax.py <course>` (see
+`docs/commands.txt`). They live in their own database, `backend/user_data/textbooks.db`
+(`TEXTBOOK_DB_PATH` to move it), separate from student data, so it can be deleted and rebuilt.
+`textbooks.BOOKS` maps each catalog course to its book(s) (Biology -> Biology 2e, U.S. History,
+Chemistry 2e, Calculus Volume 1, ...).
+
+Students can also import from the app: a course with a book that isn't imported shows a
+"Free textbook available" card on the Progress page (`textbook_import.available` on the
+course). "Import it" calls `POST /api/textbooks/import`, which downloads in a background
+thread; the page polls `GET /api/textbooks/import/<course_id>` (`running` / `done` / `failed`
+with a message) and refreshes when it's done. "Not now" hides the card in that browser.
+Set `ALLOW_TEXTBOOK_IMPORT=0` to turn in-app imports off.
+
+The importer downloads a book's source (CNXML from `github.com/openstax/osbooks-*`, text only)
+and stores:
+
+| Table | What |
+|---|---|
+| `books` | slug, course, title, license (read from the book's own files), link |
+| `sections` | number ("10.2", or none for a chapter introduction), chapter, title, in book order |
+| `passages` | ~900-character chunks of text under a heading; searched with SQLite FTS5 (`passages_fts`), falling back to LIKE without FTS5 |
+| `questions` | multiple-choice review questions with exactly 4 options and an answer letter; ones that point at a figure or table are skipped |
+| `terms` | glossary terms and meanings |
+
+How the app uses a book (all offline, a few milliseconds each):
+
+- **Quizzes**: for the topic, pick the chapter that teaches it (a chapter title naming the
+  topic, then the chapter whose glossary defines it, then the best-matching passages), and use
+  its review questions plus a glossary question or two. These go first. When the book and fact
+  bank give enough questions, the model isn't asked at all. A topic the book doesn't cover
+  gets no textbook questions.
+- **Tutor chat**: the 2-3 passages that best match the student's message (preferring the
+  topic's chapter) go into the prompt after their notes, within `DOC_CHAR_BUDGET` and at most
+  `TEXTBOOK_CHAR_BUDGET` (default 2500) characters. The reply returns `textbook_sources`.
+- **Courses**: `textbooks` on each course and an extra line in `checks`.
+
+Licensing: most OpenStax books are CC BY-NC-SA 4.0 (Physics is CC BY 4.0): free for
+non-commercial use, with credit. Clutch shows the book title, license and a link wherever it
+uses one (chat credit bar, quiz question sources). Book content is never committed to git.
 
 ## API
 
@@ -144,6 +189,8 @@ be linked with "find a matching course" (`PATCH /api/subjects/<id>`), keeping th
 - `POST /api/conversations/<id>/end` `{confidence?}` - review + progress update
 - `GET|POST /api/users/<uid>/documents`, `GET|DELETE /api/documents/<id>`
 - `GET /api/courses`, `POST /api/courses/suggest` `{query}` - catalog, and matches for what a student typed
+- `GET /api/textbooks` - imported OpenStax books with license and credit line (no sign-in needed)
+- `POST /api/textbooks/import` `{course_id}` - start downloading a course's book(s) (202); `GET /api/textbooks/import/<course_id>` - `{available, state, error}`
 - `POST /api/users/<uid>/subjects` `{name}` (custom) or `{catalog_id, topic?}` (standard course, optional topic inside; reuses the course if the student already has it)
 - `PATCH /api/subjects/<id>` `{catalog_id or null}` - link a custom course to a standard one
 - `GET /api/users/<uid>/progress` - includes `quiz_unlocked` and `badge_earned_at` per topic
@@ -166,6 +213,7 @@ New tables (like v2's quizzes and badges) need no migration block: `schema.sql` 
 ## Tests
 
 `cd backend && python -m pytest tests` (uses a fake model, no Ollama needed). Needs `pip install -r requirements.txt` for SymPy.
+`tests/test_textbooks.py` builds a tiny made-up book, so no download is needed.
 
 ## Frontend files
 

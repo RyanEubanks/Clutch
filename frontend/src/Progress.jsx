@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { CourseSuggestions, VerifiedChip } from './Courses.jsx'
 import { Badge, Egg } from './Mascot.jsx'
@@ -113,6 +113,9 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
               ×
             </button>
           </div>
+          {s.course?.textbook_import?.available?.length > 0 && (
+            <TextbookOffer course={s.course} onImported={onSubjectsChanged} />
+          )}
           {linking?.id === s.id && (
             <CourseSuggestions
               query={s.name}
@@ -196,6 +199,122 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
           onKeep={keepCustom}
           onCancel={() => setAdding('')}
         />
+      )}
+    </div>
+  )
+}
+
+const DISMISSED_KEY = 'clutch.textbookOffer.dismissed'
+
+function dismissedCourses() {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]')
+  } catch {
+    return []
+  }
+}
+
+// Offers a course's free OpenStax textbook. Importing downloads it once (needs internet),
+// then quizzes use its review questions and Mother Hen reads from it, all offline.
+function TextbookOffer({ course, onImported }) {
+  const offer = course.textbook_import
+  const [state, setState] = useState(offer.state === 'running' ? 'running' : 'idle')
+  const [error, setError] = useState(offer.state === 'failed' ? offer.error : '')
+  const [dismissed, setDismissed] = useState(() => dismissedCourses().includes(course.id))
+  const timer = useRef(null)
+  const imported = useRef(onImported) // latest callback, so polling doesn't restart on re-render
+  useEffect(() => {
+    imported.current = onImported
+  })
+
+  // Keep checking while an import runs (also after a page reload mid-import).
+  useEffect(() => {
+    if (state !== 'running') return
+    let cancelled = false
+    function poll() {
+      api
+        .textbookImportStatus(course.id)
+        .then((s) => {
+          if (cancelled) return
+          if (s.state === 'running') {
+            timer.current = setTimeout(poll, 2000)
+          } else if (s.state === 'failed') {
+            setState('idle')
+            setError(s.error || 'The import failed.')
+          } else {
+            setState('done')
+            imported.current()
+          }
+        })
+        .catch((e) => {
+          if (cancelled) return
+          setState('idle')
+          setError(e.message)
+        })
+    }
+    timer.current = setTimeout(poll, 1500)
+    return () => {
+      cancelled = true
+      clearTimeout(timer.current)
+    }
+  }, [state, course.id])
+
+  async function start() {
+    setError('')
+    try {
+      const s = await api.importTextbook(course.id)
+      if (s.state === 'done') {
+        setState('done')
+        onImported()
+      } else {
+        setState('running')
+      }
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  function notNow() {
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify([...dismissedCourses(), course.id]))
+    } catch {
+      // private window: it just comes back next time
+    }
+    setDismissed(true)
+  }
+
+  if ((dismissed && state === 'idle' && !error) || state === 'done') return null
+  const titles = offer.available.map((b) => `OpenStax ${b.title}`).join(' and ')
+  return (
+    <div className="textbook-offer">
+      <span className="textbook-offer-icon" aria-hidden="true">📖</span>
+      <div className="textbook-offer-text">
+        {state === 'running' ? (
+          <p>
+            <strong>Downloading {titles}...</strong>{' '}
+            <span className="status">This takes a few seconds to a minute. You can keep studying.</span>
+          </p>
+        ) : (
+          <>
+            <p>
+              <strong>Free textbook available: {titles}.</strong> Import it to get quiz questions with the
+              book's own answer keys, and let Mother Hen read from the book when she helps you.
+            </p>
+            <p className="status small-note">
+              One-time download of the text (no images); after that it works offline. Free for
+              non-commercial use (CC license).
+            </p>
+          </>
+        )}
+        {error && <p className="error">{error}</p>}
+      </div>
+      {state === 'idle' && (
+        <div className="actions">
+          <button onClick={start}>{error ? 'Try again' : 'Import it'}</button>
+          <button className="link" onClick={notNow}>
+            not now
+          </button>
+        </div>
       )}
     </div>
   )

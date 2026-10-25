@@ -2045,6 +2045,65 @@ button.chip.add:hover {
   color: #14532d;
 }
 
+/* Credit line for the OpenStax textbook a chat draws on. */
+.textbook-bar {
+  flex-wrap: wrap;
+  background: #effaf3;
+  color: #14532d;
+  gap: 0.25rem 0.75rem;
+}
+
+.textbook-bar a,
+.source a {
+  color: inherit;
+  font-weight: 600;
+}
+
+/* "Free textbook available" offer on a course card (Progress). */
+.textbook-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.6rem 0;
+  padding: 0.6rem 0.8rem;
+  background: #effaf3;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  color: #14532d;
+}
+
+.textbook-offer-icon {
+  font-size: 1.4rem;
+}
+
+.textbook-offer-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.textbook-offer-text p {
+  margin: 0.15rem 0;
+}
+
+.textbook-offer .actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+@media (max-width: 560px) {
+  .textbook-offer {
+    flex-wrap: wrap;
+  }
+
+  .textbook-offer .actions {
+    flex-direction: row;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 /* Half-filled dot for "Partly verified" (the ◐ character renders unreliably). */
 .half-dot {
   display: inline-block;

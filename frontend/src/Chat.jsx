@@ -26,6 +26,7 @@ export default function Chat({
   const [loading, setLoading] = useState(Boolean(initialId))
   const [error, setError] = useState('')
   const [ending, setEnding] = useState(false)
+  const [sources, setSources] = useState([]) // textbook sections behind the latest reply
   const bottomRef = useRef(null)
   // Id of a chat this panel created itself. Its first message is still being sent when
   // onCreated passes the id back as initialId, so it must not be reloaded from the server.
@@ -73,6 +74,7 @@ export default function Chat({
         ...r.conversation,
         messages: [...prev.messages, r.user_message, r.assistant_message],
       }))
+      setSources(r.textbook_sources ?? [])
       onChanged()
     } catch (e) {
       setError(e.message)
@@ -125,6 +127,8 @@ export default function Chat({
           <button className="link" onClick={onClearHomework}>Stop using it</button>
         </div>
       )}
+
+      {convo?.textbooks?.length > 0 && <TextbookBar books={convo.textbooks} sources={sources} />}
 
       {!convo && !initialId && (
         <label className="topic-picker">
@@ -222,6 +226,29 @@ export default function Chat({
             Send
           </button>
         </div>
+      )}
+    </div>
+  )
+}
+
+// Credit line for the OpenStax book(s) the tutor reads from (their license asks for it).
+function TextbookBar({ books, sources }) {
+  return (
+    <div className="context-bar textbook-bar">
+      <span>
+        📖 Mother Hen is reading from{' '}
+        {books.map((b, i) => (
+          <span key={b.slug}>
+            {i > 0 && ', '}
+            <a href={b.url} target="_blank" rel="noreferrer" title={b.attribution}>
+              OpenStax {b.title}
+            </a>{' '}
+            <span className="status">({b.license})</span>
+          </span>
+        ))}
+      </span>
+      {sources.length > 0 && (
+        <span className="status">Last answer used: {sources.map((s) => s.section).join('; ')}</span>
       )}
     </div>
   )

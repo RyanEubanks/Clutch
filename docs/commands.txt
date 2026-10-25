@@ -119,6 +119,28 @@ Needs Ollama + Flask running. Results are saved in backend\eval_results\.
 
 
 -----------------------------------------------------
+OPTIONAL: ADD FREE TEXTBOOKS (import_openstax.py)
+-----------------------------------------------------
+Downloads OpenStax textbooks (text only, no images) so quizzes can use the book's own
+review questions and the tutor can read from the book. Needs git and internet once;
+after that everything works offline. Flask can stay running: new books are used right away.
+
+Easiest: in the app, a course that has a free book shows "Free textbook available" on the
+Progress page. Click "Import it". Or from the command line:
+
+     cd backend
+     .venv\Scripts\Activate.ps1          (Mac: source .venv/bin/activate)
+     python import_openstax.py --list    # which book goes with which course
+     python import_openstax.py biology   # one course (~15 MB download, a few seconds)
+     python import_openstax.py --all     # every listed book (~200 MB of text)
+     python import_openstax.py --remove biology-2e
+
+  Good ones for the demo: biology, us-history, chemistry.
+  Books are saved in backend/user_data/ (not in git). Delete backend/user_data/textbooks.db
+  and backend/user_data/openstax/ to remove them all.
+
+
+-----------------------------------------------------
 TROUBLESHOOTING
 -----------------------------------------------------
 - "Model request failed" in the app  -> Ollama isn't running, or the model isn't pulled

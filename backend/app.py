@@ -7,6 +7,7 @@ import random
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ import demo
 import factbank
 import groundcheck
 import planner
+import textbooks
 
 try:
     import mathcheck  # SymPy answer checking for math quiz questions
@@ -39,6 +41,9 @@ client = OpenAI(base_url=os.getenv("MODEL_BASE_URL"), api_key="local")
 # Ollama runs models with a small context window by default (see docs/devlog.txt),
 # so cap how much study material goes into each prompt. Raise this once num_ctx is raised.
 DOC_CHAR_BUDGET = int(os.getenv("DOC_CHAR_BUDGET", "6000"))
+# Most textbook text the tutor prompt gets (2-3 passages); notes come first. Smaller prompts
+# are faster on small models.
+TEXTBOOK_CHAR_BUDGET = int(os.getenv("TEXTBOOK_CHAR_BUDGET", "2500"))
 
 MIN_PASSWORD_LENGTH = 4  # profiles on a shared computer, not internet accounts
 
@@ -461,8 +466,127 @@ def with_homework(system, homework):
     return system + HOMEWORK_CONTEXT.format(homework=homework) if homework else system
 
 
-def build_system_prompt(conn, convo, homework=None):
-    """The base tutor prompt, plus homework, topic, progress and study material."""
+# ---------- OpenStax textbooks (optional: see import_openstax.py) ----------
+# Without a textbook database (nothing imported yet) everything below returns nothing and
+# the app works exactly as before.
+
+_book_cache = {"key": None, "books": []}
+
+
+def imported_books():
+    """Every imported book (cached until textbooks.db changes)."""
+    path = textbooks.db_path()
+    try:
+        key = (str(path), path.stat().st_mtime_ns)
+    except OSError:
+        return []
+    if _book_cache["key"] != key:
+        try:
+            tconn = textbooks.connect(path)
+            try:
+                books = textbooks.list_books(tconn)
+            finally:
+                tconn.close()
+        except sqlite3.Error:
+            books = []
+        _book_cache.update(key=key, books=books)
+    return _book_cache["books"]
+
+
+def course_books(course_id):
+    return [b for b in imported_books() if course_id and b["course_id"] == course_id]
+
+
+def public_book(book):
+    return {"slug": book["slug"], "title": book["title"], "license": book["license"],
+            "license_url": book["license_url"], "url": book["url"], "course_id": book["course_id"],
+            "counts": book["counts"], "attribution": textbooks.attribution(book)}
+
+
+# Importing from the app: a course with a book that isn't imported yet offers it, and one
+# click downloads it in a background thread (seconds to a minute) while the page polls.
+# Set ALLOW_TEXTBOOK_IMPORT=0 to turn this off (the command line importer still works).
+ALLOW_TEXTBOOK_IMPORT = os.getenv("ALLOW_TEXTBOOK_IMPORT", "1") != "0"
+_imports = {}  # course_id -> {"state": "running" | "done" | "failed", "error": str | None}
+_import_threads = {}  # course_id -> Thread (tests wait on these)
+_imports_lock = threading.Lock()
+
+
+def start_textbook_import(course_id):
+    """Start importing a course's books unless that's already running. Returns the job."""
+    with _imports_lock:
+        job = _imports.get(course_id)
+        if job and job["state"] == "running":
+            return job
+        job = {"state": "running", "error": None}
+        _imports[course_id] = job
+
+    def work():
+        try:
+            textbooks.import_course(course_id, log=lambda *_: None)
+            job["state"] = "done"
+        except textbooks.ImportFailed as exc:
+            job.update(state="failed", error=str(exc))
+        except Exception as exc:  # keep the message for the page instead of losing the thread
+            job.update(state="failed", error=f"Import failed: {exc}")
+
+    thread = threading.Thread(target=work, name=f"textbook-import-{course_id}", daemon=True)
+    _import_threads[course_id] = thread
+    thread.start()
+    return job
+
+
+def textbook_offer(course_id):
+    """Books for a course that can still be imported, and how an import is going."""
+    have = {b["slug"] for b in course_books(course_id)}
+    missing = [{"slug": slug, "title": textbooks.TITLES.get(slug, slug)}
+               for _repo, slug in textbooks.BOOKS.get(course_id, []) if slug not in have]
+    job = _imports.get(course_id) or {}
+    return {"available": missing if ALLOW_TEXTBOOK_IMPORT else [],
+            "state": job.get("state"), "error": job.get("error")}
+
+
+def textbook_conn():
+    """The textbook database for this request (opened once), or None if there isn't one."""
+    if "textbooks" not in g:
+        g.textbooks = None
+        if textbooks.exists():
+            try:
+                g.textbooks = textbooks.connect()
+            except sqlite3.Error:
+                pass
+    return g.textbooks
+
+
+def textbook_passages(course_id, topic_name, question, budget):
+    """(prompt text, sources) from the course's books for what the student just asked,
+    falling back to the topic itself. Empty if there's no book or it doesn't cover this."""
+    slugs = [b["slug"] for b in course_books(course_id)]
+    budget = min(budget, TEXTBOOK_CHAR_BUDGET)
+    tconn = textbook_conn() if slugs and budget > 300 else None
+    if tconn is None:
+        return "", []
+    for query in (f"{topic_name} {question or ''}".strip(), topic_name):
+        text, sources = textbooks.passages_for_prompt(tconn, slugs, query, budget, topic=topic_name)
+        if text:
+            return text, sources
+    return "", []
+
+
+def conversation_books(conn, convo):
+    """The textbooks a conversation's topic draws on, for the chat's credit line."""
+    if convo["topic_id"] is None:
+        return []
+    topic = db.get_topic(conn, convo["topic_id"])
+    return [public_book(b) for b in course_books(topic["catalog_id"])] if topic else []
+
+
+def build_system_prompt(conn, convo, homework=None, question=None, sources=None):
+    """The base tutor prompt, plus homework, topic, progress and study material.
+
+    question: the student's latest message, used to find matching textbook passages.
+    sources: if a list, the textbook sections used are appended to it (for attribution).
+    """
     parts = [with_homework(SYSTEM_PROMPT, homework)]
     if convo["topic_id"] is None:
         return parts[0]
@@ -494,6 +618,16 @@ def build_system_prompt(conn, convo, homework=None):
             "and hints, and point them back to it, but still do not give final answers.\n\n"
             + "\n\n".join(excerpts)
         )
+    # Whatever budget the notes left goes to the course textbook, if one is imported.
+    book_text, used = textbook_passages(topic["catalog_id"], topic["name"], question, budget)
+    if book_text:
+        parts.append(
+            "\nPassages from the course textbook (OpenStax, free and openly licensed) are below. "
+            "Trust them over your own memory. When you use one, mention the section so the "
+            "student can read more, but still do not give final answers.\n\n" + book_text
+        )
+        if sources is not None:
+            sources.extend(used)
     return "\n".join(parts)
 
 
@@ -662,12 +796,29 @@ def quiz_unlocked(progress):
                 and progress["mastery"] >= QUIZ_UNLOCK_MASTERY)
 
 
+def public_course(course):
+    """courses.public(), plus the course's imported textbooks. A book's review questions
+    and glossary are checked answers, so an unverified course becomes partly verified."""
+    public = courses.public(course)
+    books = course_books(course["id"])
+    public["textbooks"] = [public_book(b) for b in books]
+    public["textbook_import"] = textbook_offer(course["id"])
+    if books:
+        public["checks"] = public["checks"] + [
+            f"Review questions and glossary from {b['title']} (OpenStax, {b['license']})"
+            for b in books]
+        if not public["verification"]:
+            public["verification"] = "partial"
+    return public
+
+
 def with_course(subject):
     """Add the catalog course (or None) and whether it's verified to a subject dict."""
     course = courses.get(subject.get("catalog_id"))
-    subject["course"] = courses.public(course) if course else None
+    public = public_course(course) if course else None
+    subject["course"] = public
     subject["verified"] = bool(course and course["verified"])
-    subject["verification"] = course["verification"] if course else None
+    subject["verification"] = public["verification"] if public else None
     return subject
 
 
@@ -716,7 +867,7 @@ def suggest_courses(query):
         topic = courses.matching_topic(course, query)
         as_topic = not is_course and (topic is not None or course_id in model_topic)
         suggestions.append({
-            "course": courses.public(course),
+            "course": public_course(course),
             "as_topic": as_topic,
             "topic": (topic or query.strip()) if as_topic else None,
             "why": why.get(course_id) or (
@@ -763,6 +914,9 @@ def create_app(db_path=None, demo_account=True):
 
     @app.teardown_appcontext
     def close_db(_exc):
+        tconn = g.pop("textbooks", None)
+        if tconn is not None:
+            tconn.close()
         conn = g.pop("db", None)
         if conn is not None:
             conn.close()
@@ -785,7 +939,7 @@ def create_app(db_path=None, demo_account=True):
     OPEN_ENDPOINTS = {
         "health", "chat", "read_homework", "study_guide", "transcribe_lecture", "lecture_notes",
         "profiles", "sign_up", "sign_in", "sign_out", "current_session", "recover_password", "static",
-        "list_courses", "suggest",  # the course catalog: the same for everyone, nothing stored
+        "list_courses", "suggest", "list_textbooks",  # the catalog: the same for everyone
     }
 
     @app.before_request
@@ -1074,7 +1228,32 @@ def create_app(db_path=None, demo_account=True):
 
     @app.get("/api/courses")
     def list_courses():
-        return jsonify([courses.public(c) for c in courses.CATALOG])
+        return jsonify([public_course(c) for c in courses.CATALOG])
+
+    @app.get("/api/textbooks")
+    def list_textbooks():
+        """Imported OpenStax books, with the credit line each one's license asks for."""
+        return jsonify([public_book(b) for b in imported_books()])
+
+    @app.post("/api/textbooks/import")
+    def import_textbook():
+        """Body: {"course_id": "biology"}. Starts downloading the course's book(s); poll
+        GET /api/textbooks/import/<course_id> for the result. Needs internet once."""
+        course_id = str(body().get("course_id") or "")
+        if course_id not in textbooks.BOOKS:
+            return jsonify(error="No free textbook is listed for that course"), 404
+        if not ALLOW_TEXTBOOK_IMPORT:
+            return jsonify(error="Importing textbooks from the app is turned off"), 403
+        if not textbook_offer(course_id)["available"]:
+            return jsonify(textbook_offer(course_id) | {"state": "done"})
+        start_textbook_import(course_id)
+        return jsonify(textbook_offer(course_id)), 202
+
+    @app.get("/api/textbooks/import/<course_id>")
+    def textbook_import_status(course_id):
+        if course_id not in textbooks.BOOKS:
+            return jsonify(error="No free textbook is listed for that course"), 404
+        return jsonify(textbook_offer(course_id))
 
     @app.post("/api/courses/suggest")
     def suggest():
@@ -1144,6 +1323,7 @@ def create_app(db_path=None, demo_account=True):
             return not_found("Conversation")
         convo["messages"] = db.get_messages(conn, conversation_id)
         convo["review"] = db.get_review(conn, conversation_id)
+        convo["textbooks"] = conversation_books(conn, convo)
         return jsonify(convo)
 
     @app.delete("/api/conversations/<int:conversation_id>")
@@ -1170,8 +1350,9 @@ def create_app(db_path=None, demo_account=True):
             {"role": m["role"], "content": m["content"]}
             for m in db.get_messages(conn, conversation_id)
         ]
+        sources = []
         try:
-            system = build_system_prompt(conn, convo, body().get("homework"))
+            system = build_system_prompt(conn, convo, body().get("homework"), content, sources)
             reply, check = tutor_reply(system, history)
         except Exception as exc:
             db.delete_message(conn, user_msg["id"])  # so a retry doesn't duplicate it
@@ -1181,8 +1362,10 @@ def create_app(db_path=None, demo_account=True):
         return jsonify(
             user_message=user_msg,
             assistant_message=assistant_msg,
-            conversation=db.get_conversation(conn, conversation_id),
+            conversation=db.get_conversation(conn, conversation_id)
+            | {"textbooks": conversation_books(conn, convo)},
             math_check=check["claims"],  # what the math engine found in the student's message
+            textbook_sources=sources,  # textbook sections Mother Hen was given for this reply
         )
 
     @app.post("/api/conversations/<int:conversation_id>/end")
@@ -1420,31 +1603,40 @@ def create_app(db_path=None, demo_account=True):
             description=f"About this topic: {topic['description']}\n" if topic["description"] else "",
             material=material,
         )
-        # Fact-bank questions (social studies) are right by construction.
-        facts = factbank.questions_for(topic["catalog_id"], topic["name"], QUIZ_QUESTIONS)
-        questions, seen = [], set()
+        # Textbook questions (the book's own review questions and glossary) and fact-bank
+        # questions (social studies) are right by construction.
+        slugs = [b["slug"] for b in course_books(topic["catalog_id"])]
+        tconn = textbook_conn() if slugs else None
+        book = (textbooks.quiz_questions(tconn, slugs, topic["name"], QUIZ_QUESTIONS)
+                if tconn is not None else [])
+        seen = {q["question"] for q in book}
+        facts = [f for f in factbank.questions_for(topic["catalog_id"], topic["name"], QUIZ_QUESTIONS)
+                 if f["question"] not in seen]
+        questions = []
         model_error = None
         try:
             # Small models sometimes return broken JSON or uncheckable math, so keep
-            # collecting good questions over up to two attempts.
-            for _ in range(2):
+            # collecting good questions over up to two attempts. With enough textbook
+            # and fact questions, the model isn't asked at all (faster, and all checked).
+            for _ in range(2 if len(book) + len(facts) < QUIZ_QUESTIONS else 0):
                 raw = ask_model([{"role": "user", "content": prompt}], temperature=0.4, json_mode=True)
                 for q in quiz_questions_from(raw, material=notes or None):
                     if q["question"] not in seen:
                         seen.add(q["question"])
                         questions.append(q)
-                if sum(q["verified"] for q in questions) + len(facts) >= QUIZ_QUESTIONS:
+                if sum(q["verified"] for q in questions) + len(book) + len(facts) >= QUIZ_QUESTIONS:
                     break
         except Exception as exc:
             model_error = exc
-        if model_error and len(facts) < QUIZ_QUESTIONS:
+        if model_error and len(book) + len(facts) < QUIZ_QUESTIONS:
             return jsonify(error=f"Model request failed: {model_error}"), 502
-        # Checked questions first (the model's, then fact-bank ones), then unchecked ones;
-        # unchecked number questions go last.
+        # Checked questions first (textbook, the model's, then fact-bank ones), then
+        # unchecked ones; unchecked number questions go last.
         checked = [q for q in questions if q["verified"]]
         unchecked = sorted((q for q in questions if not q["verified"]),
                            key=lambda q: 1 if q.get("numeric") else 0)
-        questions = (checked + [f for f in facts if f["question"] not in seen] + unchecked)[:QUIZ_QUESTIONS]
+        questions = (book + checked + [f for f in facts if f["question"] not in seen]
+                     + unchecked)[:QUIZ_QUESTIONS]
         if len(questions) < QUIZ_QUESTIONS:
             return jsonify(error="Mother Hen couldn't write a quiz this time. Please try again."), 502
 

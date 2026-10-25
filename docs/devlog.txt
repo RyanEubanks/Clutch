@@ -39,6 +39,18 @@ CONTENTS
  1. OPEN ISSUES AND WATCH-OUTS
 ================================================================================
 
+[OPEN-09] Textbook limits
+  Date:      Oct 25, 2026
+  Note:      - Links go to the book's front page (openstax.org/books/<slug>), not the
+               exact section: section URLs couldn't be checked from the sandbox.
+             - Chemistry 2e and the math books have no multiple-choice review
+               questions, so their textbook questions are glossary questions only.
+             - Quiz quotes are still only checked against the student's notes, not
+               against the book's passages.
+             - Chapter choice is tested on 12 real topics (all right), but a vague
+               topic ("Genetics") can still land on a nearby chapter.
+  Files:     backend/textbooks.py
+
 [OPEN-08] What still isn't verified
   Date:      Oct 25, 2026 (updated after adding the subject checkers)
   Note:      Verified: Elementary Math, Pre-Algebra, Algebra I and II, Calculus I,
@@ -48,8 +60,9 @@ CONTENTS
              course can be checked against the student's notes). Gaps even in
              verified courses: concept questions without notes, word problems,
              proofs, graphing, and calculus answers in chat. Spanish covers only
-             present-tense conjugations of 143 listed verbs. Not yet built: open
-             textbooks (same quote check as notes), programming (needs a sandbox).
+             present-tense conjugations of 143 listed verbs. Not yet built:
+             programming (needs a sandbox). With an OpenStax book imported, its
+             course gets textbook questions too (see [DECISION-09], [OPEN-09]).
   Files:     backend/courses.py
 
 [OPEN-07] Arithmetic word problems still can't be checked
@@ -125,6 +138,45 @@ CONTENTS
 ================================================================================
  2. CAUGHT BY TESTS AND TEST RUNS
 ================================================================================
+
+[TEST-16] Textbook quizzes came from the chapter that mentions the topic most
+  Date:      Oct 25, 2026
+  Found by:  chapter test on real Biology 2e (12 topics)
+  Symptom:   "Mitosis" quizzed Meiosis questions; "Evolution" quizzed Vertebrates.
+             Searching more passages didn't help.
+  Cause:     Chapters were picked by passage matches only, and other chapters say
+             "mitosis" more often than the one that teaches it.
+  Fix:       Prefer a chapter whose title names the topic, then the chapter whose
+             glossary defines it (only in the course's own books: "photosynthesis"
+             is also in the Chemistry glossary), then passage matches. 12/12 right.
+  Files:     backend/textbooks.py, backend/tests/test_textbooks.py
+
+[TEST-15] Unrelated topics pulled in textbook passages
+  Date:      Oct 25, 2026
+  Found by:  search dry run on real books
+  Symptom:   "Underwater basket weaving" got Ecology passages (via "water"), and
+             "Civil War" quizzes included chapter 29 questions.
+  Fix:       A search only counts if at least half of the topic's key words are in
+             the best passage; quizzes draw on the whole best chapter.
+  Files:     backend/textbooks.py
+
+[TEST-14] Some review questions can't be shown as written
+  Date:      Oct 25, 2026
+  Found by:  import of real Biology 2e and U.S. History
+  Symptom:   Questions like "Which structure is labeled B?", options like "A, C, B"
+             (labels in a figure), and 5-option questions.
+  Fix:       Skip questions that link to or mention a figure, table or graph, have
+             letter-sequence options, or don't have exactly 4 options.
+  Files:     backend/textbooks.py
+
+[TEST-13] Book metadata lookup always fell through
+  Date:      Oct 25, 2026
+  Found by:  first import of a real collection file
+  Symptom:   "no metadata in its collection file" for every book.
+  Cause:     `a.find(...) or b.find(...)`: an XML element with no children counts as
+             False in Python, so a found element was thrown away.
+  Fix:       Compare with None explicitly.
+  Files:     backend/textbooks.py
 
 [TEST-12] Quotes from notes failed on an apostrophe and a comma
   Date:      Oct 25, 2026
@@ -496,6 +548,33 @@ CONTENTS
  6. DESIGN DECISIONS
 ================================================================================
 
+[DECISION-10] Offer textbook imports in the app
+  Date:      Oct 25, 2026
+  Why:       Students (and the demo) shouldn't need a terminal to get a course's book.
+  How:       A course whose book isn't imported shows "Free textbook available" on
+             the Progress page. "Import it" downloads in a background thread (real
+             test: Psychology 2e in 3 s) while the page polls; failures (e.g. no
+             internet) show a message and a Try again button. Only books listed in
+             textbooks.BOOKS can be imported, and only when signed in.
+             ALLOW_TEXTBOOK_IMPORT=0 turns it off.
+  Files:     backend/app.py, backend/textbooks.py, frontend/src/Progress.jsx
+
+[DECISION-09] OpenStax textbooks as a fourth way to check
+  Date:      Oct 25, 2026
+  Why:       Free, openly licensed books with official review questions and
+             glossaries cover the courses our checkers can't (Biology, Economics,
+             Psychology) and back up the ones they can.
+  How:       import_openstax.py downloads the text only (~3% of the repo: Biology
+             2e is 15 MB, parses in 0.5 s, 5.8 MB in the database) into its own
+             textbooks.db. Quizzes use the book's questions first and skip the model
+             when there are enough; chat gets 2-3 matching passages (at most 2500
+             characters) instead of whole books, so prompts stay small for Gemma.
+             Search is SQLite FTS5, a few ms. No new dependencies.
+  License:   CC BY-NC-SA 4.0 (most) / CC BY 4.0 (Physics): read from each book's
+             files and shown with the title and a link wherever the book is used.
+             Book content stays out of git.
+  Files:     backend/textbooks.py, backend/import_openstax.py, backend/app.py
+
 [DECISION-08] Three ways to verify a course: calculate, look up, or quote the notes
   Date:      Oct 25, 2026
   1. Calculate: statistics/geometry (valuecheck.py), physics/chemistry
@@ -592,3 +671,9 @@ CONTENTS
                                                         database (all rows kept)
   Oct 25  Subject checkers ([DECISION-08])              125 test functions pass after
                                                         [TEST-10] to [TEST-12]
+  Oct 25  OpenStax textbooks ([DECISION-09])            142 pass after [TEST-13] to
+                                                        [TEST-16]; real Biology 2e,
+                                                        U.S. History, Chemistry 2e
+                                                        imported; 12/12 chapter test
+  Oct 25  In-app textbook import ([DECISION-10])        147 pass; real Psychology 2e
+                                                        imported from the app in 3 s

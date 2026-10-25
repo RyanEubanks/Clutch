@@ -7,6 +7,8 @@ import pytest
 
 # Point the module-level app at a throwaway DB so importing app.py never touches real data.
 os.environ["DATABASE_PATH"] = str(Path(tempfile.mkdtemp()) / "import.db")
+# ...and at no textbook database (tests that need one import a small made-up book).
+os.environ["TEXTBOOK_DB_PATH"] = str(Path(tempfile.mkdtemp()) / "no-textbooks.db")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app as app_module  # noqa: E402

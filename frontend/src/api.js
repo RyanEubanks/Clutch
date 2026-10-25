@@ -44,6 +44,9 @@ export const api = {
     request(`/subjects/${id}`, { method: 'PATCH', body: { catalog_id: catalogId } }),
   courses: () => request('/courses'),
   suggestCourses: (query) => request('/courses/suggest', { method: 'POST', body: { query } }),
+  // Free OpenStax textbooks: start importing a course's book, then poll its status.
+  importTextbook: (courseId) => request('/textbooks/import', { method: 'POST', body: { course_id: courseId } }),
+  textbookImportStatus: (courseId) => request(`/textbooks/import/${encodeURIComponent(courseId)}`),
   deleteSubject: (id) => request(`/subjects/${id}`, { method: 'DELETE' }),
   createTopic: (subjectId, name, description) =>
     request(`/subjects/${subjectId}/topics`, { method: 'POST', body: { name, description } }),
