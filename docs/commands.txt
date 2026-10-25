@@ -1,0 +1,117 @@
+CLUTCH - HOW TO RUN EVERYTHING (Windows / PowerShell)
+=====================================================
+
+The app has 3 pieces that must all be running at once, each in its own terminal:
+
+  1. Ollama   - runs the model (gemma4:e2b) at http://localhost:11434
+  2. Flask    - the backend API (backend/app.py) at http://127.0.0.1:5001
+  3. Vite     - the React frontend (npm run dev) at http://localhost:5173
+
+The frontend sends /api/* requests to Flask on port 5001 (see frontend/vite.config.js),
+and Flask talks to Ollama using the settings in backend/.env.
+
+
+-----------------------------------------------------
+ONE-TIME SETUP (only the first time, or on a new computer)
+-----------------------------------------------------
+
+1. Install Ollama from https://ollama.com and download the model:
+
+     ollama pull gemma4:e2b
+
+2. Create the backend's .env file (skip if backend/.env already exists):
+
+     cd backend
+     copy .env.example .env
+
+   It should contain:
+     MODEL_BASE_URL=http://localhost:11434/v1
+     MODEL_NAME=gemma4:e2b
+
+3. Create the Python virtual environment and install packages
+   (skip creating it if backend\.venv already exists):
+
+     cd backend
+     python -m venv .venv
+     .\.venv\Scripts\Activate.ps1
+     pip install -r requirements.txt
+
+   If PowerShell says "running scripts is disabled", run this once, then try again:
+     Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+4. Install the frontend packages:
+
+     cd frontend
+     npm install
+
+
+-----------------------------------------------------
+EVERY TIME YOU RUN THE APP
+-----------------------------------------------------
+
+TERMINAL 1 - Ollama
+  On Windows, Ollama usually starts by itself (llama icon in the system tray).
+  Check it's running:
+
+     ollama list
+
+  If that errors with "could not connect", start it yourself and leave this terminal open:
+
+     ollama serve
+
+  (If ollama serve says the port is already in use, Ollama is already running - that's fine.)
+
+
+TERMINAL 2 - Flask backend
+
+     cd backend
+     .venv\Scripts\Activate.ps1
+     flask --app app run --port 5001
+
+  You'll see (.venv) at the start of the prompt once the venv is active.
+  The --port 5001 part matters: the frontend and the CLI both expect port 5001.
+  Quick check in a browser: http://127.0.0.1:5001/api/health
+  Leave this terminal open. Stop it with Ctrl+C.
+
+
+TERMINAL 3 - Frontend
+
+     cd frontend
+     npm run dev
+
+  Open the URL it prints (usually http://localhost:5173).
+  Leave this terminal open. Stop it with Ctrl+C.
+
+
+-----------------------------------------------------
+OPTIONAL: TERMINAL CHAT (chat_cli.py) - no browser needed
+-----------------------------------------------------
+Needs Ollama + Flask running (Terminals 1 and 2). The frontend is not needed.
+
+     cd backend
+     .venv\Scripts\Activate.ps1
+     python chat_cli.py
+
+  Type messages to the tutor. Type quit (or exit) to leave.
+  The first reply can be slow while the model loads.
+
+
+-----------------------------------------------------
+OPTIONAL: RUN THE TUTOR EVAL (eval_tutor.py)
+-----------------------------------------------------
+Needs Ollama + Flask running. Results are saved in backend\eval_results\.
+
+     cd backend
+     .venv\Scripts\Activate.ps1
+     python eval_tutor.py            # 2 repetitions of every scenario
+     python eval_tutor.py --reps 1   # quicker
+
+
+-----------------------------------------------------
+TROUBLESHOOTING
+-----------------------------------------------------
+- "Model request failed" in the app  -> Ollama isn't running, or the model isn't pulled
+                                        (run: ollama list / ollama pull gemma4:e2b).
+- Frontend shows a network/proxy error -> Flask isn't running, or it's not on port 5001.
+- "flask is not recognized"            -> the venv isn't activated (run the Activate.ps1 line).
+- To leave the venv:                      deactivate
