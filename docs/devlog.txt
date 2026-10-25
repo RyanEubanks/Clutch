@@ -39,6 +39,18 @@ CONTENTS
  1. OPEN ISSUES AND WATCH-OUTS
 ================================================================================
 
+[OPEN-10] backend/.env is tracked by git
+  Date:      Oct 25, 2026
+  Found by:  review for the README update
+  Note:      .gitignore lists .env, but backend/.env was committed before that
+             (in "gemma gemma"), so git keeps tracking it. Today it only holds
+             MODEL_BASE_URL and MODEL_NAME, which is harmless. But app.py reads
+             SECRET_KEY from it: if anyone sets one there, it would be pushed to
+             GitHub. To stop tracking it (keeps your local file):
+               git rm --cached backend/.env   then commit.
+             Each teammate then needs their own .env (copy .env.example).
+  Files:     backend/.env, .gitignore
+
 [OPEN-09] Textbook limits
   Date:      Oct 25, 2026
   Note:      - Links go to the book's front page (openstax.org/books/<slug>), not the
@@ -105,34 +117,40 @@ CONTENTS
              is unreliable at multi-step math. JSON mode also made it commit to
              an answer before working anything out.
   Fix:       Quizzes: fixed by the SymPy checker (see [MODEL-03]).
-             Tutor chat and study guides: OPEN. Options, best first:
+             Tutor chat: the tutor's "right/not quite" verdicts on math are now
+             checked with SymPy (see [MODEL-06]); its explanations aren't.
+             Textbook passages ([DECISION-09]) ground chat in other subjects.
+             Study guides: OPEN. Options, best first:
                - Use a bigger model (e4b ~6 GB, 12B ~8 GB, 26B ~16-18 GB at 4-bit).
                - Generate in two steps (reason in text first, then format JSON).
                - Turn on Gemma 4's thinking mode (check how through Ollama).
-               - SymPy-check the tutor's "Yes, that's right" verdicts.
   Files:     backend/app.py
 
-[OPEN-03] Concept quiz questions can't be machine-checked
+[OPEN-03] Concept quiz questions can't be machine-checked (PARTLY FIXED)
   Date:      Oct 25, 2026
-  Note:      Only math questions (derivatives, integrals, limits, etc.) are
-             verified by SymPy. Concept questions ("what does the chain rule
-             apply to?") still depend on the model. Checked questions are picked
-             first, and show a "math-checked" tag in the quiz.
+  Note:      Concept questions ("what does the chain rule apply to?") written by
+             the model still can't be computed. Now they can be checked against
+             the student's notes ([DECISION-08]), and courses with a textbook or
+             fact bank get questions that are right by construction. Without any
+             of those, they're still unchecked (ranked last, no tag).
   Files:     backend/app.py, backend/mathcheck.py, frontend/src/Quiz.jsx
 
-[OPEN-04] No passwords or access checks
-  Date:      Oct 24, 2026
-  Note:      Sign-in is username only, and the API trusts whatever user/topic ID
-             it's given, so anyone who knows an ID can read that data. Fine for a
-             local demo; must be fixed before real students use it.
-  Files:     backend/app.py
+[OPEN-04] No passwords or access checks (FIXED)
+  Date:      Oct 24, 2026 (fixed Oct 25)
+  Note:      Sign-in was username only, and the API trusted whatever user/topic ID
+             it was given.
+  Fix:       Ryan's sign-in work (commit f966fb1): passwords (Werkzeug scrypt),
+             recovery codes, a signed session cookie, and every request may only
+             touch rows the signed-in student owns (db.OWNER_QUERIES); someone
+             else's row looks exactly like a missing one.
+  Files:     backend/app.py, backend/db.py
 
-[OPEN-05] Scanned homework isn't saved
+[OPEN-05] Scanned homework isn't saved (FIXED)
   Date:      Oct 24, 2026
-  Note:      Homework text lives only in the browser and is lost on refresh.
-             Saving it as a study material (documents table) is a possible next
-             step.
-  Files:     frontend/src/Homework.jsx, frontend/src/App.jsx
+  Note:      Homework text lived only in the browser and was lost on refresh.
+  Fix:       "Save to Materials" stores it as a document, optionally on a topic,
+             so the tutor and quizzes can use it.
+  Files:     frontend/src/Homework.jsx
 
 
 ================================================================================
@@ -548,6 +566,28 @@ CONTENTS
  6. DESIGN DECISIONS
 ================================================================================
 
+[DECISION-12] System requirements and check_setup.py
+  Date:      Oct 25, 2026
+  Minimum:   8 GB RAM, 12 GB free disk, macOS 14 / Windows 10 22H2 / 64-bit
+             Linux, Python 3.11, Node.js 20.19 or 22.13, Ollama with Gemma 4
+             (0.20+).
+  Recommended: 16 GB RAM, Apple silicon or an NVIDIA/AMD GPU with 8 GB+,
+             20 GB free, Python 3.12+, Node.js 24 LTS, the latest Ollama.
+  Where from: Python: the pinned packages' Requires-Python (httpx2/httpcore2
+             need 3.11; the code itself also compiles on 3.10). Node: the engines
+             of Vite 8 (^20.19 || >=22.12) and ESLint 10 (^20.19 || ^22.13 ||
+             >=24). Memory: gemma4:e2b is a 7.2 GB download; Google lists 5.7 GB
+             at 8-bit and 2.9 GB at 4-bit before the KV cache. OS: Ollama's docs
+             (macOS Sonoma 14+, Windows 10 22H2+; Intel Macs run on the CPU only).
+             Sources disagree on the first Ollama with Gemma 4 (0.6 / 0.20 /
+             0.22), so check_setup.py only warns below 0.20.
+  How:       README table; package.json "engines" (npm warns on an older Node);
+             backend/check_setup.py (standard library only, so it runs before
+             pip install) checks Python, packages, SQLite/FTS5, RAM, disk, OS,
+             Ollama + the model, Node and git.
+  Files:     README.md, backend/check_setup.py, frontend/package.json,
+             docs/commands.txt
+
 [DECISION-11] Course mastery and course trophies
   Date:      Oct 25, 2026
   Mastery:   The average over all of a course's topics, unstudied ones as 0. Simple
@@ -696,3 +736,6 @@ CONTENTS
   Oct 25  Course mastery + trophies ([DECISION-11])     157 pass; v6 -> v7 upgrade
                                                         tested on a copy of the real
                                                         database (all rows kept)
+  Oct 25  Requirements + docs review ([DECISION-12])    160 pass (with Ryan's keyboard
+                                                        tests); check_setup.py tried
+                                                        on Linux with a fake Ollama

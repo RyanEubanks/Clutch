@@ -1,5 +1,8 @@
-CLUTCH - HOW TO RUN EVERYTHING (Windows / PowerShell)
-=====================================================
+CLUTCH - HOW TO RUN EVERYTHING (Windows / PowerShell, with Mac / Linux notes)
+=============================================================================
+
+Commands below are for Windows PowerShell. On a Mac or Linux, see "MAC / LINUX" just
+below: only the venv commands and the copy command are different.
 
 The app has 3 pieces that must all be running at once, each in its own terminal:
 
@@ -9,6 +12,39 @@ The app has 3 pieces that must all be running at once, each in its own terminal:
 
 The frontend sends /api/* requests to Flask on port 5001 (see frontend/vite.config.js),
 and Flask talks to Ollama using the settings in backend/.env.
+
+
+-----------------------------------------------------
+SYSTEM REQUIREMENTS (full table in README.md)
+-----------------------------------------------------
+                  Minimum                          Recommended
+  Memory (RAM)    8 GB (close other apps)          16 GB or more
+  GPU             none (CPU works, slowly)         Apple silicon, or NVIDIA/AMD with 8 GB+
+  Disk space      12 GB free                       20 GB free
+  OS              macOS 14 / Windows 10 22H2       latest macOS / Windows 11
+  Python          3.11                             3.12 or newer
+  Node.js         20.19 or 22.13                   24 LTS
+  Ollama          0.20 or newer (Gemma 4)          latest
+  Internet        only for setup and textbooks     same
+
+Check a computer (after step 2 below; the venv doesn't have to be active):
+
+     cd backend
+     python check_setup.py
+
+  [ok] = fine, [~~] = works but below the recommendation, [!!] = must be fixed.
+
+
+-----------------------------------------------------
+MAC / LINUX
+-----------------------------------------------------
+Everything else is the same as Windows. Differences:
+
+  Copy the settings file:   cp .env.example .env
+  Make the venv:            python3 -m venv .venv
+  Activate it:              source .venv/bin/activate
+  Ollama on a Mac:          the Ollama app runs it (llama icon in the menu bar).
+                            If "ollama list" can't connect, open the Ollama app.
 
 
 -----------------------------------------------------
@@ -152,4 +188,6 @@ TROUBLESHOOTING
                                             flask --app app reset-password <profile name>
 - Demo for the video                   -> pick "Alex" on the sign-in screen (no password).
                                           Alex's data is rebuilt fresh every time.
+- Replies are very slow / the computer  -> not enough free memory for the model. Close other
+  freezes                                 apps (browser tabs too) and run python check_setup.py.
 - To leave the venv:                      deactivate

@@ -232,10 +232,17 @@ New tables (like v2's quizzes and badges) need no migration block: `schema.sql` 
 
 ## Frontend files
 
-`App.jsx` (sign-in, sidebar, tabs), `Chat.jsx` (saved study sessions + end-of-session review),
-`Homework.jsx` (scan homework), `Materials.jsx`, `Progress.jsx`, `Meter.jsx`, `Markdown.jsx`, `api.js`.
-`SymbolKeyboard.jsx` + `keyboards.js`: the symbol keyboard under the chat box (math, calculus,
-linear algebra, geometry, statistics, physics, chemistry, Spanish, French, German), picked from
-the session's topic or the chat so far. Keys type `^` for powers and `× ÷ − √ π`, which
-`mathcheck.py` reads (it turns `√(...)` and `x²` into forms it can check).
-Homework text is still kept in the browser only; saving it to the database is a possible next step.
+| File | What |
+|---|---|
+| `App.jsx` | Sign-in check, sidebar, tabs (Study, Planner, Homework, Materials, Progress) |
+| `SignIn.jsx` | Profiles, passwords, recovery codes, the Alex demo |
+| `Chat.jsx` | Saved study sessions, end-of-session review, textbook credit bar |
+| `SymbolKeyboard.jsx`, `keyboards.js` | The symbol keyboard under the chat box (math, calculus, linear algebra, geometry, statistics, physics, chemistry, Spanish, French, German), picked from the session's topic or the chat so far. Keys type `^` for powers and `× ÷ − √ π`, which `mathcheck.py` reads (it turns `√(...)` and `x²` into forms it can check) |
+| `Homework.jsx`, `ScanPages.jsx`, `scan.js` | Scan homework (camera or photos), study guide, "Save to Materials" |
+| `Recording.jsx`, `recorder.js`, `useRecording.js` | Lecture recording (audio worklet, sent to the model in parts under 30 s) |
+| `Materials.jsx` | Study materials (notes, saved homework, lecture notes) with search |
+| `Planner.jsx` | Calendar, spaced-repetition reviews, exam readiness |
+| `Progress.jsx`, `Courses.jsx` | Courses and topics, course suggestions, verification chips, course mastery and trophies, textbook offers |
+| `Quiz.jsx` | Mastery quizzes, how each answer was checked, badges and the course trophy banner |
+| `Mascot.jsx`, `Meter.jsx`, `Markdown.jsx` | Mother Hen art, eggs, badges and trophies; progress bars; Markdown with KaTeX math |
+| `api.js` | Every call to the backend |
