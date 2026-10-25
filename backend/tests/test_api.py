@@ -226,6 +226,57 @@ def test_homework_read_and_study_guide(client, model):
     assert g.get_json()["guide"] == "1. $x^2$"
 
 
+# ---------- lecture recording ----------
+
+def wav_b64(seconds=1.0, rate=16000):
+    import base64, io, wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\0\0" * int(seconds * rate))
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def test_lecture_transcribe(client, model):
+    model.reply = "  The integral of u dv equals uv minus the integral of v du.  "
+    r = client.post("/api/lecture/transcribe", json={"audio": "data:audio/wav;base64," + wav_b64()})
+    assert r.status_code == 200
+    assert r.get_json()["text"] == "The integral of u dv equals uv minus the integral of v du."
+    content = model.calls[-1]["messages"][0]["content"]
+    assert content[0]["type"] == "input_audio" and content[0]["input_audio"]["format"] == "wav"
+    assert model.calls[-1]["temperature"] == 0
+
+    assert client.post("/api/lecture/transcribe", json={}).status_code == 400
+    assert client.post("/api/lecture/transcribe", json={"audio": "not base64!"}).status_code == 400
+    not_wav = __import__("base64").b64encode(b"just some bytes here").decode()
+    assert client.post("/api/lecture/transcribe", json={"audio": not_wav}).status_code == 400
+    too_long = client.post("/api/lecture/transcribe", json={"audio": wav_b64(seconds=120)})
+    assert too_long.status_code == 413
+
+
+def test_lecture_notes_are_made_in_parts(client, model, monkeypatch):
+    monkeypatch.setattr(app_module, "LECTURE_PART_CHARS", 100)
+    model.reply = "## Notes"
+    transcript = "\n\n".join(f"Sentence number {i} about integration by parts." for i in range(8))
+    r = client.post("/api/lecture/notes", json={"transcript": transcript})
+    data = r.get_json()
+    assert r.status_code == 200 and data["parts"] > 1
+    assert data["notes"] == "\n\n".join(["## Notes"] * data["parts"])
+    prompts = [c["messages"][0]["content"] for c in model.calls[-data["parts"]:]]
+    assert "one-line title" in prompts[0] and "do not add a # title" in prompts[1]
+    assert all(len(p.split("Transcript (part")[1]) < 100 + 40 for p in prompts)
+    assert client.post("/api/lecture/notes", json={"transcript": "  "}).status_code == 400
+
+
+def test_split_transcript_keeps_everything():
+    text = "First paragraph. " * 30 + "\n\n" + "Short one.\n\n" + "x" * 250
+    parts = app_module.split_transcript(text, 120)
+    assert all(len(p) <= 120 for p in parts)
+    assert "".join(parts).replace("\n", "").replace(" ", "") == text.replace("\n", "").replace(" ", "")
+
+
 # ---------- quizzes & badges ----------
 
 QUIZ_JSON = json.dumps({"questions": [

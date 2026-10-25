@@ -7,6 +7,8 @@ import Materials from './Materials.jsx'
 import { Hen, Logo } from './Mascot.jsx'
 import Progress from './Progress.jsx'
 import Quiz from './Quiz.jsx'
+import { formatDuration } from './recorder'
+import { useRecording } from './useRecording'
 
 const USER_KEY = 'clutch.user'
 
@@ -140,6 +142,8 @@ export default function App() {
           </button>
         </div>
 
+        <RecordingIndicator onOpen={() => openMaterial(null)} />
+
         <nav className="tabs">
           {VIEWS.map(([v, label]) => (
             <button key={v} className={view === v ? 'tab active' : 'tab'} onClick={() => setView(v)}>
@@ -237,6 +241,25 @@ export default function App() {
         )}
       </main>
     </div>
+  )
+}
+
+// Shows while a lecture is being recorded (or its transcript is waiting), from any page
+function RecordingIndicator({ onOpen }) {
+  const rec = useRecording()
+  if (rec.status === 'idle') return null
+  const label =
+    rec.status === 'recording'
+      ? `Recording ${formatDuration(rec.seconds)}`
+      : rec.status === 'paused'
+        ? `Paused ${formatDuration(rec.seconds)}`
+        : rec.status === 'done'
+          ? 'Lecture ready to save'
+          : 'Finishing transcript...'
+  return (
+    <button className={`rec-indicator ${rec.status}`} onClick={onOpen} title="Open the lecture recorder">
+      <span className="rec-dot" /> {label}
+    </button>
   )
 }
 

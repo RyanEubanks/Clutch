@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import Markdown from './Markdown.jsx'
+import { formatDuration } from './recorder'
+import { useRecording } from './useRecording'
 import { guessTitle } from './scan'
 import ScanPages from './ScanPages.jsx'
 
@@ -75,7 +77,9 @@ export default function MaterialsView({ user, topics, openId, onSelect, onStudy 
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState(openId ?? null)
   const [doc, setDoc] = useState(null)
-  const [adding, setAdding] = useState(false)
+  const recording = useRecording()
+  // Reopen the recorder if a lecture is being recorded (or waiting to be saved)
+  const [adding, setAdding] = useState(recording.status !== 'idle')
   const [closed, setClosed] = useState(() => new Set()) // collapsed group labels
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
@@ -316,14 +320,37 @@ function Reader({ doc, docs, onStudy, onDelete }) {
   )
 }
 
+// Lecture notes, followed by the full transcript so nothing said is lost (and it's searchable)
+function withTranscript(notes, transcript) {
+  return `${notes.trim()}\n\n## Full transcript\n\n${transcript.trim()}`
+}
+
+const ADD_MODES = [
+  ['scan', 'Scan pages'],
+  ['record', 'Record lecture'],
+  ['type', 'Type or paste'],
+]
+
 function AddMaterial({ user, topics, onSaved, onCancel }) {
+  const recording = useRecording()
+  const [mode, setMode] = useState(recording.status !== 'idle' ? 'record' : 'scan')
   const [images, setImages] = useState([]) // pages waiting to be read (or that failed)
   const [reading, setReading] = useState('') // progress message while pages are read
   const [scanError, setScanError] = useState('')
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
+  // A lecture organized while this form was closed is picked up when it reopens
+  const [title, setTitle] = useState(() =>
+    recording.notes ? guessTitle(recording.notes, 'Lecture notes') : '',
+  )
+  const [content, setContent] = useState(() =>
+    recording.notes ? withTranscript(recording.notes, recording.transcript) : '',
+  )
   const [topicId, setTopicId] = useState('')
   const [error, setError] = useState('')
+
+  function applyLectureNotes(notes) {
+    setContent(withTranscript(notes, recording.transcript))
+    if (!title.trim()) setTitle(guessTitle(notes, 'Lecture notes'))
+  }
 
   // Pages are read as soon as they're added, one per request, so we can show progress
   // and keep what's done if one fails. Any pages left from a failed read go first.
@@ -360,17 +387,21 @@ function AddMaterial({ user, topics, onSaved, onCancel }) {
     e.preventDefault()
     setError('')
     try {
-      onSaved(
-        await api.createDocument(user.id, {
-          title,
-          content,
-          topic_id: topicId ? Number(topicId) : null,
-        }),
-      )
+      const doc = await api.createDocument(user.id, {
+        title,
+        content,
+        topic_id: topicId ? Number(topicId) : null,
+      })
+      if (mode === 'record') recording.reset() // saved, so the recording and its backup can go
+      onSaved(doc)
     } catch (err) {
       setError(err.message)
     }
   }
+
+  const busy = !!reading || (mode === 'record' && recording.status !== 'idle' && recording.status !== 'done')
+  // Scanning and recording fill in the editor; show it once there's something to edit
+  const showEditor = mode === 'type' || Boolean(content.trim())
 
   return (
     <form className="card form add-material" onSubmit={save}>
@@ -379,56 +410,210 @@ function AddMaterial({ user, topics, onSaved, onCancel }) {
         Notes attached to a topic are shared with the tutor in that topic's sessions.
       </p>
 
-      <fieldset className="scan-box" disabled={!!reading}>
-        <legend>Scan your notes</legend>
-        <p className="status">
-          Photograph each page. Clutch reads it right away into text below that you can fix up.
-        </p>
-        <ScanPages
-          images={images}
-          setImages={setImages}
-          onError={setScanError}
-          onAdded={(added) => readNotes([...images, ...added])}
-        />
-        {reading && <p className="scan-progress">{reading}</p>}
-        {scanError && <p className="error">{scanError}</p>}
-        {!reading && images.length > 0 && (
-          <button type="button" onClick={() => readNotes(images)}>
-            Try reading {images.length === 1 ? 'that page' : `those ${images.length} pages`} again
+      <div className="mode-tabs" role="tablist">
+        {ADD_MODES.map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            className={mode === m ? 'mode-tab active' : 'mode-tab'}
+            onClick={() => setMode(m)}
+          >
+            {label}
+            {m === 'record' && recording.active && <span className="rec-dot" aria-label="recording" />}
           </button>
-        )}
-      </fieldset>
+        ))}
+      </div>
 
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (e.g. Lecture 4 notes)" />
-      <TopicSelect topics={topics} value={topicId} onChange={setTopicId} />
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Scanned text shows up here. You can also type or paste notes."
-        rows={10}
-      />
-      {content.trim() && (
-        <div className="preview">
-          <span className="preview-label">Preview</span>
-          <Markdown>{content}</Markdown>
-        </div>
+      {mode === 'scan' && (
+        <fieldset className="scan-box" disabled={!!reading}>
+          <legend>Scan your notes</legend>
+          <p className="status">
+            Photograph each page. Clutch reads it right away into text below that you can fix up.
+          </p>
+          <ScanPages
+            images={images}
+            setImages={setImages}
+            onError={setScanError}
+            onAdded={(added) => readNotes([...images, ...added])}
+          />
+          {reading && <p className="scan-progress">{reading}</p>}
+          {scanError && <p className="error">{scanError}</p>}
+          {!reading && images.length > 0 && (
+            <button type="button" onClick={() => readNotes(images)}>
+              Try reading {images.length === 1 ? 'that page' : `those ${images.length} pages`} again
+            </button>
+          )}
+        </fieldset>
+      )}
+
+      {mode === 'record' && <RecordPanel onNotes={applyLectureNotes} hasNotes={Boolean(content.trim())} />}
+
+      {showEditor && (
+        <>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (e.g. Lecture 4 notes)" />
+          <TopicSelect topics={topics} value={topicId} onChange={setTopicId} />
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Type or paste your notes here."
+            rows={10}
+          />
+          {content.trim() && (
+            <div className="preview">
+              <span className="preview-label">Preview</span>
+              <Markdown>{content}</Markdown>
+            </div>
+          )}
+        </>
       )}
       <div className="row">
-        <label className="file-link">
-          or load a .txt / .md file
-          <input type="file" accept=".txt,.md,.markdown,text/plain" onChange={loadFile} />
-        </label>
+        {mode === 'type' ? (
+          <label className="file-link">
+            or load a .txt / .md file
+            <input type="file" accept=".txt,.md,.markdown,text/plain" onChange={loadFile} />
+          </label>
+        ) : (
+          <span />
+        )}
         <div className="actions">
           <button type="button" className="secondary" onClick={onCancel}>
-            Cancel
+            {mode === 'record' && recording.active ? 'Close (keeps recording)' : 'Cancel'}
           </button>
-          <button type="submit" disabled={!title.trim() || !content.trim() || !!reading}>
+          <button type="submit" disabled={!title.trim() || !content.trim() || busy}>
             Save
           </button>
         </div>
       </div>
       {error && <p className="error">{error}</p>}
     </form>
+  )
+}
+
+function RecordPanel({ onNotes, hasNotes }) {
+  const rec = useRecording()
+  const transcriptEnd = useRef(null)
+
+  useEffect(() => {
+    transcriptEnd.current?.scrollIntoView({ block: 'nearest' })
+  }, [rec.transcript])
+
+  async function makeNotes() {
+    const notes = await rec.organize()
+    if (notes) onNotes(notes)
+  }
+
+  function discard() {
+    if (window.confirm('Throw away this recording and its transcript?')) rec.reset()
+  }
+
+  return (
+    <section className="record-box">
+      {rec.status === 'idle' && rec.draft && (
+        <div className="draft-note">
+          <span>
+            You have an unsaved lecture transcript from{' '}
+            {new Date(rec.draft.savedAt).toLocaleString()}.
+          </span>
+          <button type="button" className="secondary" onClick={rec.recoverDraft}>
+            Recover it
+          </button>
+          <button type="button" className="link" onClick={rec.discardDraft}>
+            discard
+          </button>
+        </div>
+      )}
+
+      {rec.status === 'idle' && (
+        <>
+          <p className="status">
+            Record a lecture with your microphone. Clutch transcribes it on this computer as you
+            go, then turns the transcript into notes. Keep this tab open; you can use the rest of
+            the app while it records.
+          </p>
+          <button type="button" className="record-btn" onClick={rec.start}>
+            <span className="rec-dot" /> Start recording
+          </button>
+        </>
+      )}
+
+      {rec.status === 'starting' && <p className="status">Waiting for the microphone...</p>}
+
+      {(rec.status === 'recording' || rec.status === 'paused') && (
+        <div className="record-controls">
+          <span className={rec.status === 'recording' ? 'rec-live' : 'rec-live paused'}>
+            <span className="rec-dot" /> {rec.status === 'recording' ? 'Recording' : 'Paused'}
+          </span>
+          <span className="rec-time">{formatDuration(rec.seconds)}</span>
+          <span className="level" aria-hidden="true">
+            <span style={{ width: `${Math.round(rec.level * 100)}%` }} />
+          </span>
+          {rec.status === 'recording' ? (
+            <button type="button" className="secondary" onClick={rec.pause}>
+              Pause
+            </button>
+          ) : (
+            <button type="button" className="secondary" onClick={rec.resume}>
+              Resume
+            </button>
+          )}
+          <button type="button" onClick={rec.stop}>
+            Stop
+          </button>
+        </div>
+      )}
+
+      {rec.status !== 'idle' && rec.status !== 'starting' && (
+        <div className="transcript-box">
+          <span className="preview-label">
+            Transcript{rec.seconds ? ` · ${formatDuration(rec.seconds)}` : ''}
+            {rec.pending > 0 && ' · transcribing...'}
+          </span>
+          {rec.transcript ? (
+            rec.transcript.split('\n\n').map((p, i) => <p key={i}>{p}</p>)
+          ) : (
+            <p className="status">
+              {rec.status === 'done'
+                ? 'No speech was picked up.'
+                : 'The first lines show up about half a minute in.'}
+            </p>
+          )}
+          <div ref={transcriptEnd} />
+        </div>
+      )}
+
+      {rec.status === 'finishing' && <p className="scan-progress">Transcribing the last part...</p>}
+
+      {rec.failed > 0 && rec.status !== 'finishing' && (
+        <p className="error">
+          {rec.failed === 1 ? 'One part' : `${rec.failed} parts`} of the recording couldn't be
+          transcribed.{' '}
+          <button type="button" className="link" onClick={rec.retryFailed}>
+            Try again
+          </button>
+        </p>
+      )}
+
+      {rec.status === 'done' && (
+        <div className="actions">
+          {rec.transcript && (
+            <button type="button" onClick={makeNotes} disabled={rec.organizing || rec.failed > 0}>
+              {rec.organizing
+                ? 'Writing notes... (about 30 seconds per 10 minutes of lecture)'
+                : hasNotes
+                  ? 'Redo notes from transcript'
+                  : 'Turn into notes'}
+            </button>
+          )}
+          <button type="button" className="secondary danger" onClick={discard} disabled={rec.organizing}>
+            Discard recording
+          </button>
+        </div>
+      )}
+
+      {rec.error && <p className="error">{rec.error}</p>}
+    </section>
   )
 }
 

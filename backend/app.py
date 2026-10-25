@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import math
 import os
@@ -112,6 +114,52 @@ numbered steps and problems as numbered lists.
 - If part of the page is unreadable, write [unclear] there."""
 
 READ_PROMPTS = {"homework": READ_PROMPT, "notes": NOTES_READ_PROMPT}
+
+# ---------- lecture recording ----------
+
+# Gemma ignores audio after about 30 seconds, so the browser sends shorter pieces.
+MAX_AUDIO_BYTES = 3_000_000  # ~90 s of 16 kHz mono WAV; real pieces are under 30 s
+# Each part of a transcript is turned into notes separately so prompts fit the context window.
+LECTURE_PART_CHARS = int(os.getenv("LECTURE_PART_CHARS", "4000"))
+
+TRANSCRIBE_PROMPT = """Transcribe this audio exactly, word for word, with normal punctuation. \
+Output only the transcript. If there is no speech, output nothing."""
+
+LECTURE_NOTES_PROMPT = """Turn this part of a lecture transcript into clear study notes in Markdown.
+- Use ## headings for each topic the lecturer covers, and bullet points for the key ideas.
+- Write every formula in LaTeX: $...$ inside a sentence, $$...$$ on its own line. Spoken math \
+becomes symbols, for example "the integral of u d v" becomes $\\int u \\, dv$.
+- The transcript comes from speech recognition, so fix words that were clearly misheard when \
+the right word is obvious from context (for example "lay" for the acronym LIATE). Do not add \
+facts, examples or explanations that the lecturer did not say.
+- Keep definitions, worked examples, and anything the lecturer says is important, on the exam, \
+or for homework.
+- Leave out filler, greetings and repetition.
+- {position}
+- Output only the notes.
+
+Transcript (part {part} of {total}):
+{transcript}"""
+
+
+def split_transcript(text, max_chars):
+    """Split text into parts of at most max_chars, at paragraph or sentence breaks."""
+    pieces = []
+    for para in [p.strip() for p in text.split("\n\n") if p.strip()]:
+        while len(para) > max_chars:
+            cut = para.rfind(". ", 0, max_chars)
+            cut = cut + 1 if cut > max_chars // 2 else max_chars
+            pieces.append(para[:cut].strip())
+            para = para[cut:].strip()
+        pieces.append(para)
+    parts, current = [], ""
+    for piece in pieces:
+        if current and len(current) + 2 + len(piece) > max_chars:
+            parts.append(current)
+            current = piece
+        else:
+            current = f"{current}\n\n{piece}" if current else piece
+    return parts + [current] if current else parts
 
 STUDY_GUIDE_PROMPT = """Make a study guide for the material in this homework. Use Markdown \
 with these sections:
@@ -454,6 +502,64 @@ def create_app(db_path=None):
             return jsonify(error=f"Model request failed: {exc}"), 502
 
         return jsonify(text="\n\n".join(pages))
+
+    @app.post("/api/lecture/transcribe")
+    def transcribe_lecture():
+        """Transcribe one short piece of a lecture recording.
+
+        Body: {"audio": "<base64 WAV>"} (a data: URL prefix is fine). Pieces should be under
+        30 seconds; the browser recorder cuts them at quiet moments.
+        """
+        audio = (body().get("audio") or "").split(",")[-1]
+        try:
+            raw = base64.b64decode(audio, validate=True)
+        except (binascii.Error, ValueError):
+            return jsonify(error="audio must be base64-encoded WAV"), 400
+        if raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
+            return jsonify(error="audio must be base64-encoded WAV"), 400
+        if len(raw) > MAX_AUDIO_BYTES:
+            return jsonify(error="audio piece is too long; send under 30 seconds at a time"), 413
+
+        try:
+            text = ask_model(
+                [{
+                    "role": "user",
+                    "content": [
+                        {"type": "input_audio", "input_audio": {"data": audio, "format": "wav"}},
+                        {"type": "text", "text": TRANSCRIBE_PROMPT},
+                    ],
+                }],
+                temperature=0,
+            )
+        except Exception as exc:
+            return jsonify(error=f"Model request failed: {exc}"), 502
+        return jsonify(text=(text or "").strip())
+
+    @app.post("/api/lecture/notes")
+    def lecture_notes():
+        """Turn a lecture transcript into Markdown study notes, one part at a time."""
+        transcript = (body().get("transcript") or "").strip()
+        if not transcript:
+            return jsonify(error="transcript is required"), 400
+
+        parts = split_transcript(transcript, LECTURE_PART_CHARS)
+        notes = []
+        try:
+            for i, part in enumerate(parts, start=1):
+                position = (
+                    "Start with a one-line title for the lecture, like # Integration by parts."
+                    if i == 1
+                    else "This continues earlier notes, so do not add a # title."
+                )
+                notes.append(ask_model([{
+                    "role": "user",
+                    "content": LECTURE_NOTES_PROMPT.format(
+                        position=position, part=i, total=len(parts), transcript=part
+                    ),
+                }]).strip())
+        except Exception as exc:
+            return jsonify(error=f"Model request failed: {exc}"), 502
+        return jsonify(notes="\n\n".join(notes), parts=len(parts))
 
     @app.post("/api/homework/study-guide")
     def study_guide():

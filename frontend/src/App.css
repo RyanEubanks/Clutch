@@ -1140,3 +1140,187 @@ button.jump:hover {
 .scan-box .error {
   margin: 0;
 }
+
+/* ---------- lecture recording ---------- */
+
+.mode-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: #e6e6ea;
+  padding: 0.2rem;
+  border-radius: 8px;
+}
+
+button.mode-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background: transparent;
+  color: #1d1d1f;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.9rem;
+  border-radius: 6px;
+}
+
+button.mode-tab.active {
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.rec-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #dc2626;
+  flex-shrink: 0;
+}
+
+.record-box {
+  border: 1px dashed #c8c8cd;
+  border-radius: 10px;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.record-box > .status {
+  margin: 0;
+}
+
+button.record-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: white;
+  color: #b91c1c;
+  border: 1px solid #dc2626;
+  font-weight: 600;
+}
+
+button.record-btn:hover {
+  background: #fef2f2;
+}
+
+.record-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.rec-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: #b91c1c;
+}
+
+.rec-live .rec-dot,
+.rec-indicator.recording .rec-dot {
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+.rec-live.paused {
+  color: #666;
+}
+
+.rec-live.paused .rec-dot,
+.rec-indicator.paused .rec-dot {
+  background: #999;
+  animation: none;
+}
+
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.rec-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+}
+
+/* Microphone level, so you can see it's hearing the lecturer */
+.level {
+  flex: 1;
+  min-width: 4rem;
+  height: 0.4rem;
+  background: #e6e6ea;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.level span {
+  display: block;
+  height: 100%;
+  background: #16a34a;
+  transition: width 0.1s linear;
+}
+
+.transcript-box {
+  width: 100%;
+  box-sizing: border-box;
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: 0.6rem 0.8rem;
+  background: #f8f8fa;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.transcript-box p {
+  margin: 0 0 0.6rem;
+}
+
+.draft-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.7rem;
+  background: #fff8e6;
+  border: 1px solid #f3dfb0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+button.rec-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+button.rec-indicator.paused,
+button.rec-indicator.finishing,
+button.rec-indicator.done {
+  background: #f4f4f6;
+  color: #444;
+  border-color: #dcdce0;
+}
+
+button.rec-indicator.done .rec-dot {
+  background: #16a34a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-live .rec-dot,
+  .rec-indicator.recording .rec-dot {
+    animation: none;
+  }
+}

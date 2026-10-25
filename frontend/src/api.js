@@ -40,6 +40,9 @@ export const api = {
   deleteDocument: (id) => request(`/documents/${id}`, { method: 'DELETE' }),
   readPages: (images, kind = 'homework') =>
     request('/homework/read', { method: 'POST', body: { images, kind } }),
+  transcribe: (audio) => request('/lecture/transcribe', { method: 'POST', body: { audio } }),
+  lectureNotes: (transcript) =>
+    request('/lecture/notes', { method: 'POST', body: { transcript } }),
   studyGuide: (homework) =>
     request('/homework/study-guide', { method: 'POST', body: { homework } }),
 

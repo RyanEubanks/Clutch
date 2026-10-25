@@ -40,6 +40,8 @@ Instead of handing out answers, it teaches the way a good tutor does:
   it points to the step where you went wrong without giving the answer away.
 - **Reads your homework.** Snap a photo of a worksheet and Clutch turns it into editable text, makes a
   study guide, and keeps the chat focused on that material.
+- **Records lectures.** Record a class with your microphone. Clutch transcribes it on your own
+  computer as it goes, then turns the transcript into organized notes with the math typeset.
 - **Tracks progress.** Sessions are saved per subject and topic, with a review at the end and a
   mastery score over time. Each topic's egg hatches as mastery grows.
 - **Quizzes and badges.** At 80% mastery a topic's quiz unlocks; pass it (4 of 5) to earn that
