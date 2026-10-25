@@ -36,6 +36,9 @@ ONE-TIME SETUP (only the first time, or on a new computer)
      .\.venv\Scripts\Activate.ps1
      pip install -r requirements.txt
 
+   Run pip install -r requirements.txt again whenever requirements.txt changes (for example
+   after sympy and mpmath were added for checking math quiz answers).
+
    If PowerShell says "running scripts is disabled", run this once, then try again:
      Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
@@ -108,6 +111,11 @@ Needs Ollama + Flask running. Results are saved in backend\eval_results\.
      .venv\Scripts\Activate.ps1
      python eval_tutor.py            # 2 repetitions of every scenario
      python eval_tutor.py --reps 1   # quicker
+
+  Quiz answer-key check (has the model write quizzes, reports how often SymPy fixed them):
+
+     python eval_quiz.py             # 2 quizzes per topic
+     python eval_quiz.py --reps 1    # quicker
 
 
 -----------------------------------------------------
