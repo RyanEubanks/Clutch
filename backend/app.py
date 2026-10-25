@@ -223,7 +223,9 @@ REVIEW_PROMPT = (
     'in this exact shape: {"understanding": <number from 0 to 1>, '
     '"summary": "<one sentence on what was studied>", '
     '"strengths": "<what the student did well>", '
-    '"gaps": "<what the student still needs to work on>"}'
+    '"gaps": "<what the student still needs to work on>"}. '
+    "Write any math in LaTeX between $ signs, escaping each backslash for JSON, "
+    'for example "$\\\\frac{d}{dx} x^2 = 2x$".'
 )
 
 
@@ -631,13 +633,22 @@ def build_system_prompt(conn, convo, homework=None, question=None, sources=None)
     return "\n".join(parts)
 
 
+# A lone backslash starting a LaTeX command (\frac, \sqrt, \times): JSON would read "\f" or
+# "\t" as a control character and choke on "\s", so double it before parsing.
+LATEX_BACKSLASH = re.compile(r"(?<!\\)\\(?=[A-Za-z]{2,})")
+
+
 def parse_review(text):
     """Pull the review fields out of the model's reply, tolerating messy output."""
     match = re.search(r"\{.*\}", text or "", re.DOTALL)
-    try:
-        data = json.loads(match.group(0)) if match else {}
-    except json.JSONDecodeError:
-        data = {}
+    data = {}
+    if match:
+        for candidate in (LATEX_BACKSLASH.sub(r"\\\\", match.group(0)), match.group(0)):
+            try:
+                data = json.loads(candidate)
+                break
+            except json.JSONDecodeError:
+                continue
     try:
         understanding = min(1.0, max(0.0, float(data.get("understanding"))))
     except (TypeError, ValueError):

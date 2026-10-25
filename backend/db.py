@@ -371,9 +371,12 @@ def save_session_review(conn, conversation_id, understanding, confidence, summar
 
     Mastery is a moving average of session scores. Each score blends the model's
     assessment (70%) with the student's own confidence (30%) when both are given.
+    Reviewing the same session again replaces that session's share of mastery instead of
+    blending it in a second time (see _rescore).
     """
     convo = get_conversation(conn, conversation_id)
     topic_id = convo["topic_id"]
+    old_review = get_review(conn, conversation_id)
     conn.execute(
         """INSERT INTO session_reviews
                (conversation_id, topic_id, understanding, confidence, summary, strengths, gaps)
@@ -404,7 +407,12 @@ def save_session_review(conn, conversation_id, understanding, confidence, summar
             )
         else:
             mastery = prev["mastery"]
-            if score is not None:
+            old_score = (session_score(old_review["understanding"], old_review["confidence"])
+                         if already_ended and old_review else None)
+            if old_score is not None and score is not None:
+                mastery = _rescore(conn, convo["user_id"], topic_id, conversation_id,
+                                   mastery, old_score, score)
+            elif score is not None:
                 # First scored session sets mastery directly; later ones nudge it.
                 mastery = score if prev["sessions_count"] == 0 else (
                     (1 - MASTERY_WEIGHT) * mastery + MASTERY_WEIGHT * score
@@ -423,6 +431,29 @@ def save_session_review(conn, conversation_id, understanding, confidence, summar
     return _row(conn.execute(
         "SELECT * FROM session_reviews WHERE conversation_id = ?", (conversation_id,)
     ).fetchone())
+
+
+def _rescore(conn, user_id, topic_id, conversation_id, mastery, old_score, new_score):
+    """Swap one session's score for a new one in a topic's mastery, exactly.
+
+    Mastery is a chain of blends, so each session's score sits in it with a fixed weight:
+    100% for the topic's first scored session (it set mastery outright) or MASTERY_WEIGHT
+    for later ones, times (1 - MASTERY_WEIGHT) for every scored session that came after.
+    Changing the score moves mastery by that weight times the change.
+    """
+    rows = conn.execute(
+        """SELECT r.conversation_id, r.understanding, r.confidence FROM session_reviews r
+           JOIN conversations c ON c.id = r.conversation_id
+           WHERE c.user_id = ? AND r.topic_id = ? ORDER BY r.id""",
+        (user_id, topic_id),
+    ).fetchall()
+    scored = [r["conversation_id"] for r in rows
+              if r["conversation_id"] == conversation_id
+              or session_score(r["understanding"], r["confidence"]) is not None]
+    position = scored.index(conversation_id)
+    weight = 1.0 if position == 0 else MASTERY_WEIGHT
+    weight *= (1 - MASTERY_WEIGHT) ** (len(scored) - position - 1)
+    return min(1.0, max(0.0, mastery + weight * (new_score - old_score)))
 
 
 def session_score(understanding, confidence):

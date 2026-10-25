@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { CourseSuggestions, VerifiedChip } from './Courses.jsx'
+import Markdown from './Markdown.jsx'
 import { Badge, Egg } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
@@ -139,7 +140,11 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
                         ).toLocaleDateString()}`
                       : 'Not studied yet'}
                   </span>
-                  {p?.last_gaps && <span className="gaps">Work on: {p.last_gaps}</span>}
+                  {p?.last_gaps && (
+                    <span className="gaps">
+                      Work on: <Markdown inline>{p.last_gaps}</Markdown>
+                    </span>
+                  )}
                 </div>
                 <Meter label="Mastery" value={p?.mastery ?? 0} />
                 {p?.badge_earned_at ? (

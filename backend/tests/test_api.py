@@ -805,3 +805,66 @@ def test_reset_password_terminal_command(tmp_path, model):
     sign_in(client, "ry", "fresh123")
     assert runner.invoke(args=["reset-password", "nobody"], input="x\nx\n").exit_code != 0
     assert runner.invoke(args=["reset-password", "alex"], input="x\nx\n").exit_code != 0  # the demo
+
+
+# ---------- re-reviewing a session ----------
+
+def review_json(understanding):
+    return json.dumps({"understanding": understanding, "summary": "s", "strengths": "a", "gaps": "g"})
+
+
+def end_session(client, model, user, topic, understanding, confidence=None, convo=None):
+    """Study (or reuse) a session and end it with the model rating `understanding`."""
+    if convo is None:
+        convo = client.post(f"/api/users/{user['id']}/conversations", json={"topic_id": topic["id"]}).get_json()
+        client.post(f"/api/conversations/{convo['id']}/messages", json={"content": "help"})
+    model.review = review_json(understanding)
+    body = {} if confidence is None else {"confidence": confidence}
+    assert client.post(f"/api/conversations/{convo['id']}/end", json=body).status_code == 200
+    return convo
+
+
+def mastery_and_sessions(client, user):
+    row = client.get(f"/api/users/{user['id']}/progress").get_json()[0]
+    return row["mastery"], row["sessions_count"]
+
+
+def test_review_again_replaces_the_sessions_share_instead_of_blending_twice(client, model):
+    user, _, topic = setup_topic(client)
+    first = end_session(client, model, user, topic, 0.5)
+    second = end_session(client, model, user, topic, 0.9)
+    assert mastery_and_sessions(client, user) == (0.66, 2)  # 0.6*0.5 + 0.4*0.9
+
+    # Review the latest session again with a lower score: as if it had scored that all along
+    end_session(client, model, user, topic, 0.4, convo=second)
+    mastery, sessions = mastery_and_sessions(client, user)
+    assert sessions == 2 and abs(mastery - (0.6 * 0.5 + 0.4 * 0.4)) < 1e-4
+
+    # Re-review the FIRST session after a later one: its share (it set mastery, then one blend) is 0.6
+    end_session(client, model, user, topic, 1.0, convo=first)
+    mastery, sessions = mastery_and_sessions(client, user)
+    assert sessions == 2 and abs(mastery - (0.6 * 1.0 + 0.4 * 0.4)) < 1e-4
+
+    # Reviewing again with the same rating changes nothing (the old bug nudged it every time)
+    end_session(client, model, user, topic, 1.0, convo=first)
+    end_session(client, model, user, topic, 1.0, convo=first)
+    assert abs(mastery_and_sessions(client, user)[0] - (0.6 * 1.0 + 0.4 * 0.4)) < 1e-4
+
+
+def test_review_again_counts_confidence_too(client, model):
+    user, _, topic = setup_topic(client)
+    convo = end_session(client, model, user, topic, 0.8, confidence=1)  # 0.7*0.8 + 0.3*0 = 0.56
+    assert abs(mastery_and_sessions(client, user)[0] - 0.56) < 1e-4
+    end_session(client, model, user, topic, 0.8, confidence=5, convo=convo)  # 0.7*0.8 + 0.3*1 = 0.86
+    assert abs(mastery_and_sessions(client, user)[0] - 0.86) < 1e-4
+
+
+def test_review_math_in_latex_survives_json(client, model):
+    user, _, topic = setup_topic(client)
+    convo = client.post(f"/api/users/{user['id']}/conversations", json={"topic_id": topic["id"]}).get_json()
+    client.post(f"/api/conversations/{convo['id']}/messages", json={"content": "help"})
+    # The model forgot to escape its backslashes, as small models often do
+    model.review = r'{"understanding": 0.9, "summary": "Found $\frac{d}{dx}\sin(x^2) = 2x\cos(x^2)$", "strengths": "Used $\times$ correctly", "gaps": "none"}'
+    review = client.post(f"/api/conversations/{convo['id']}/end", json={}).get_json()["review"]
+    assert review["summary"] == r"Found $\frac{d}{dx}\sin(x^2) = 2x\cos(x^2)$"
+    assert review["strengths"] == r"Used $\times$ correctly" and review["understanding"] == 0.9

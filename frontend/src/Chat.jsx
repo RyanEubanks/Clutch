@@ -262,15 +262,19 @@ function ReviewCard({ review }) {
       <h3>{great ? 'Egg-cellent work!' : 'Session review'}</h3>
       {review.understanding != null && <Meter label="Understanding" value={review.understanding} />}
       {review.confidence != null && <p>Your confidence: {review.confidence}/5</p>}
-      {review.summary && <p>{review.summary}</p>}
+      {review.summary && (
+        <p>
+          <Markdown inline>{review.summary}</Markdown>
+        </p>
+      )}
       {review.strengths && (
         <p>
-          <strong>Went well:</strong> {review.strengths}
+          <strong>Went well:</strong> <Markdown inline>{review.strengths}</Markdown>
         </p>
       )}
       {review.gaps && (
         <p>
-          <strong>Work on next:</strong> {review.gaps}
+          <strong>Work on next:</strong> <Markdown inline>{review.gaps}</Markdown>
         </p>
       )}
     </div>

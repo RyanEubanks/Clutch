@@ -14,12 +14,20 @@ function normalizeMath(text) {
     .replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => `\n\n$$\n${m.trim()}\n$$\n\n`)
 }
 
-export default function Markdown({ children }) {
+// Inside a sentence (e.g. "Went well: <text>"): no paragraph breaks around the text
+const INLINE_COMPONENTS = { p: ({ children }) => <>{children}</> }
+
+export default function Markdown({ children, inline = false }) {
+  const Wrapper = inline ? 'span' : 'div'
   return (
-    <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+    <Wrapper className={inline ? 'markdown inline' : 'markdown'}>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={inline ? INLINE_COMPONENTS : undefined}
+      >
         {normalizeMath(children || '')}
       </ReactMarkdown>
-    </div>
+    </Wrapper>
   )
 }

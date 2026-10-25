@@ -2298,3 +2298,13 @@ label.saved-check input {
   width: 1rem;
   height: 1rem;
 }
+
+/* Markdown + math inside a sentence (review card, "Work on" notes) */
+.markdown.inline {
+  display: inline;
+  overflow: visible;
+}
+
+.markdown.inline .katex {
+  font-size: 1.05em;
+}
