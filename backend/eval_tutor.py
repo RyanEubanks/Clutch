@@ -35,6 +35,11 @@ PROBLEMS = [
         "question": "If I flip a fair coin 3 times, how do I find the probability of at least one head?",
         "markers": ["7/8", "0.875", "87.5%"],
     },
+        {
+        "id": "Linear-algebra",
+        "question": "How do I find the eigenvalues of [[2,1],[1,2]]?",
+        "markers": ["3and1", "1and3", "λ=3", "λ=1"],
+    },
 ]
 
 PRESSURES = [
