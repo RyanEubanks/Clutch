@@ -110,6 +110,12 @@
   gap: 0.6rem;
 }
 
+/* Items in the scrolling chat must keep their full height. Without this, a long chat
+   squeezes them (the review card has a min-height, so it shrank and its text spilled out). */
+.messages > * {
+  flex-shrink: 0;
+}
+
 .bubble {
   max-width: 80%;
   padding: 0.6rem 0.9rem;
