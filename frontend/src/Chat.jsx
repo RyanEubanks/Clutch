@@ -3,6 +3,17 @@ import { api } from './api'
 import Markdown from './Markdown.jsx'
 import { Badge, Hen } from './Mascot.jsx'
 import Meter from './Meter.jsx'
+import SymbolKeyboard from './SymbolKeyboard.jsx'
+
+const KEYBOARD_KEY = 'clutch.keyboardOpen'
+
+function loadKeyboardOpen() {
+  try {
+    return localStorage.getItem(KEYBOARD_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 // One study session. Messages are saved in the database as they're sent; a new chat
 // is only created on its first message, so empty ones don't pile up.
@@ -27,7 +38,9 @@ export default function Chat({
   const [error, setError] = useState('')
   const [ending, setEnding] = useState(false)
   const [sources, setSources] = useState([]) // textbook sections behind the latest reply
+  const [keyboardOpen, setKeyboardOpen] = useState(loadKeyboardOpen)
   const bottomRef = useRef(null)
+  const inputRef = useRef(null)
   // Id of a chat this panel created itself. Its first message is still being sent when
   // onCreated passes the id back as initialId, so it must not be reloaded from the server.
   const createdId = useRef(null)
@@ -46,6 +59,18 @@ export default function Chat({
   }, [initialId])
 
   const messages = convo?.messages ?? []
+  // "Calculus I / Chain rule": what the symbol keyboard goes by
+  const currentTopic = convo ? convo.topic_id : topicId
+  const topicLabel = topics.find((t) => t.id === currentTopic)?.label ?? convo?.topic_name ?? ''
+
+  function toggleKeyboard(open) {
+    setKeyboardOpen(open)
+    try {
+      localStorage.setItem(KEYBOARD_KEY, open ? '1' : '0')
+    } catch {
+      // Storage unavailable: it just won't be remembered
+    }
+  }
 
   // Scroll to the newest message whenever the chat changes
   useEffect(() => {
@@ -215,17 +240,38 @@ export default function Chat({
           </div>
         </div>
       ) : (
-        <div className="input-row">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && send()}
-            placeholder="Type your question..."
-          />
-          <button onClick={send} disabled={loading}>
-            Send
-          </button>
-        </div>
+        <>
+          {keyboardOpen && (
+            <SymbolKeyboard
+              inputRef={inputRef}
+              value={input}
+              onChange={setInput}
+              topicLabel={topicLabel}
+              contextText={[homework, ...messages.slice(-6).map((m) => m.content), input].join('\n')}
+            />
+          )}
+          <div className="input-row">
+            <button
+              type="button"
+              className={keyboardOpen ? 'kb-toggle active' : 'kb-toggle'}
+              onClick={() => toggleKeyboard(!keyboardOpen)}
+              title={keyboardOpen ? 'Hide the symbol keyboard' : 'Show a symbol keyboard (math, accents...)'}
+              aria-pressed={keyboardOpen}
+            >
+              √x
+            </button>
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && send()}
+              placeholder="Type your question..."
+            />
+            <button onClick={send} disabled={loading}>
+              Send
+            </button>
+          </div>
+        </>
       )}
     </div>
   )

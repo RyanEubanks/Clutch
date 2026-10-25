@@ -53,9 +53,41 @@ class MathError(ValueError):
 
 # ---------- parsing ----------
 
+SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789-")
+
+
+def unicode_math(text, root):
+    """Symbols students type (the app's symbol keyboard, phone keyboards): x² -> x^(2), and
+    √(...) or √16 -> root(...). `root` formats the radicand; arithmetic checking needs digits
+    and operators only ((16)^(0.5)), while parsing can use sqrt(16)."""
+    text = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+", lambda m: "^(" + m.group(0).translate(SUPERSCRIPT_DIGITS) + ")", text)
+    start = 0
+    while (i := text.find("√", start)) >= 0:
+        rest = text[i + 1:].lstrip()
+        skipped = len(text) - i - 1 - len(rest)
+        if rest.startswith("("):  # √(...): find its matching bracket, so √(√(16)) works
+            depth = 0
+            for n, ch in enumerate(rest):
+                depth += {"(": 1, ")": -1}.get(ch, 0)
+                if depth == 0:
+                    break
+            if depth:
+                break  # unbalanced: leave it
+            inner, end = rest[1:n], i + 1 + skipped + n + 1
+        else:  # √16, √x
+            m = re.match(r"\d+(?:\.\d+)?|[A-Za-z]", rest)
+            if not m:
+                break
+            inner, end = m.group(0), i + 1 + skipped + m.end()
+        text = text[:i] + root(inner) + text[end:]
+        start = i  # the radicand may hold another √
+    return text
+
+
 def clean(text):
     text = str(text).strip().strip("$").strip()
     text = text.replace("−", "-").replace("·", "*").replace("×", "*").replace("π", "pi")
+    text = unicode_math(text, lambda inner: f"sqrt({inner})")
     # Models often write absolute value as |x| (e.g. ln|x|): turn innermost |...| into abs(...).
     for _ in range(3):
         text = re.sub(r"\|([^|]+)\|", r"(abs(\1))", text)
@@ -402,6 +434,8 @@ def _plain_math(text):
                      ("÷", "/"), ("−", "-"), ("\\left", ""), ("\\right", ""), (",", "")):
         text = text.replace(old, new)
     text = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", r"((\1)/(\2))", text)
+    # A root as a power, so "√(16) + 1 = 5" is checked whole, not as "(16) + 1 = 5"
+    text = unicode_math(text, lambda inner: f"(({inner})^(0.5))")
     return BLANKS.sub("?", text)
 
 

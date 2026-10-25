@@ -219,4 +219,8 @@ New tables (like v2's quizzes and badges) need no migration block: `schema.sql` 
 
 `App.jsx` (sign-in, sidebar, tabs), `Chat.jsx` (saved study sessions + end-of-session review),
 `Homework.jsx` (scan homework), `Materials.jsx`, `Progress.jsx`, `Meter.jsx`, `Markdown.jsx`, `api.js`.
+`SymbolKeyboard.jsx` + `keyboards.js`: the symbol keyboard under the chat box (math, calculus,
+linear algebra, geometry, statistics, physics, chemistry, Spanish, French, German), picked from
+the session's topic or the chat so far. Keys type `^` for powers and `× ÷ − √ π`, which
+`mathcheck.py` reads (it turns `√(...)` and `x²` into forms it can check).
 Homework text is still kept in the browser only; saving it to the database is a possible next step.

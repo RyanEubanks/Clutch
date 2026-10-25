@@ -2308,3 +2308,73 @@ label.saved-check input {
 .markdown.inline .katex {
   font-size: 1.05em;
 }
+
+/* ---------- symbol keyboard (math, science, accents) ---------- */
+
+.symbol-keyboard {
+  background: white;
+  border: 1px solid #dcdce0;
+  border-radius: 12px;
+  padding: 0.5rem 0.6rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.kb-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.45rem;
+}
+
+.kb-head select {
+  padding: 0.25rem 0.4rem;
+  font-size: 0.85rem;
+}
+
+.kb-head button.link {
+  font-size: 0.8rem;
+}
+
+.kb-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+
+button.kb-key {
+  min-width: 2.4rem;
+  padding: 0.35rem 0.5rem;
+  background: #f4f4f6;
+  color: #1d1d1f;
+  border: 1px solid #dcdce0;
+  border-radius: 7px;
+  font-size: 1rem;
+  font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+  line-height: 1.2;
+}
+
+button.kb-key:hover {
+  background: #e8eefc;
+  border-color: #93c5fd;
+}
+
+button.kb-key:active {
+  background: #dbe5fb;
+}
+
+button.kb-toggle {
+  flex-shrink: 0;
+  background: #f4f4f6;
+  color: #2563eb;
+  border: 1px solid #c8c8cd;
+  padding: 0.5rem 0.65rem;
+  font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+  font-size: 1.05rem;
+}
+
+button.kb-toggle.active {
+  background: #e8eefc;
+  border-color: #2563eb;
+}
