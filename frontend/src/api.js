@@ -38,6 +38,8 @@ export const api = {
   createDocument: (userId, doc) =>
     request(`/users/${userId}/documents`, { method: 'POST', body: doc }),
   deleteDocument: (id) => request(`/documents/${id}`, { method: 'DELETE' }),
+  readPages: (images, kind = 'homework') =>
+    request('/homework/read', { method: 'POST', body: { images, kind } }),
   studyGuide: (homework) =>
     request('/homework/study-guide', { method: 'POST', body: { homework } }),
 

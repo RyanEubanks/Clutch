@@ -214,6 +214,14 @@ def test_homework_read_and_study_guide(client, model):
     assert r.get_json()["text"] == "1. $x^2$\n\n1. $x^2$"
     assert model.calls[-1]["temperature"] == 0
     assert client.post("/api/homework/read", json={}).status_code == 400
+    assert "homework problems" in model.calls[-1]["messages"][0]["content"][1]["text"]
+
+    # Notes use their own prompt, which keeps headings instead of numbering problems
+    client.post("/api/homework/read", json={"images": ["data:image/jpeg;base64,AAA"], "kind": "notes"})
+    assert "Transcribe the notes" in model.calls[-1]["messages"][0]["content"][1]["text"]
+    bad = client.post("/api/homework/read", json={"images": ["data:image/jpeg;base64,AAA"], "kind": "essay"})
+    assert bad.status_code == 400
+
     g = client.post("/api/homework/study-guide", json={"homework": "1. $x^2$"})
     assert g.get_json()["guide"] == "1. $x^2$"
 

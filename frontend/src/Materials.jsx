@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import Markdown from './Markdown.jsx'
+import { guessTitle } from './scan'
+import ScanPages from './ScanPages.jsx'
 
 const NO_TOPIC = 'No topic'
 
@@ -315,10 +317,34 @@ function Reader({ doc, docs, onStudy, onDelete }) {
 }
 
 function AddMaterial({ user, topics, onSaved, onCancel }) {
+  const [images, setImages] = useState([])
+  const [reading, setReading] = useState('') // progress message while pages are read
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [topicId, setTopicId] = useState('')
   const [error, setError] = useState('')
+
+  // Read one page per request so we can show progress and keep what's done if one fails
+  async function readNotes() {
+    setError('')
+    let text = content.trim()
+    let done = 0
+    try {
+      for (const image of images) {
+        setReading(`Reading page ${done + 1} of ${images.length}... (about 10 seconds a page)`)
+        const page = (await api.readPages([image], 'notes')).text.trim()
+        text = text ? `${text}\n\n${page}` : page
+        setContent(text)
+        if (done === 0 && !title.trim()) setTitle(guessTitle(page))
+        done++
+      }
+    } catch (err) {
+      setError(`${err.message}. Pages read so far were kept; try the rest again.`)
+    } finally {
+      setImages((prev) => prev.slice(done)) // leave only the pages that weren't read
+      setReading('')
+    }
+  }
 
   async function loadFile(e) {
     const file = e.target.files?.[0]
@@ -347,24 +373,45 @@ function AddMaterial({ user, topics, onSaved, onCancel }) {
     <form className="card form add-material" onSubmit={save}>
       <h3>Add material</h3>
       <p className="status">
-        Notes attached to a topic are shared with the tutor in that topic's sessions. To add a
-        photo of your notes, scan it on the Homework tab and save it from there.
+        Notes attached to a topic are shared with the tutor in that topic's sessions.
       </p>
+
+      <fieldset className="scan-box" disabled={!!reading}>
+        <legend>Scan your notes</legend>
+        <p className="status">Photograph each page. Clutch reads them into text you can fix up.</p>
+        <ScanPages images={images} setImages={setImages} onError={setError} />
+        {images.length > 0 && (
+          <button type="button" onClick={readNotes}>
+            Read {images.length === 1 ? 'page' : `${images.length} pages`}
+          </button>
+        )}
+        {reading && <p className="status">{reading}</p>}
+      </fieldset>
+
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (e.g. Lecture 4 notes)" />
       <TopicSelect topics={topics} value={topicId} onChange={setTopicId} />
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        placeholder="Paste your notes here, or load a .txt / .md file below"
+        placeholder="Scanned text shows up here. You can also type or paste notes."
         rows={10}
       />
+      {content.trim() && (
+        <div className="preview">
+          <span className="preview-label">Preview</span>
+          <Markdown>{content}</Markdown>
+        </div>
+      )}
       <div className="row">
-        <input type="file" accept=".txt,.md,.markdown,text/plain" onChange={loadFile} />
+        <label className="file-link">
+          or load a .txt / .md file
+          <input type="file" accept=".txt,.md,.markdown,text/plain" onChange={loadFile} />
+        </label>
         <div className="actions">
           <button type="button" className="secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button type="submit" disabled={!title.trim() || !content.trim()}>
+          <button type="submit" disabled={!title.trim() || !content.trim() || !!reading}>
             Save
           </button>
         </div>

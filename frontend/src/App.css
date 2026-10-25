@@ -1080,3 +1080,50 @@ button.jump:hover {
     padding: 0 0.75rem 2rem;
   }
 }
+
+/* Scanning notes in the Materials add form */
+.scan-box {
+  border: 1px dashed #c8c8cd;
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem 0.9rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.scan-box legend {
+  font-weight: 600;
+  padding: 0 0.3rem;
+}
+
+.scan-box .status {
+  margin: 0;
+}
+
+.add-material .preview {
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.preview-label {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  margin-bottom: 0.25rem;
+}
+
+.file-link {
+  font-size: 0.85rem;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.file-link input {
+  display: none;
+}

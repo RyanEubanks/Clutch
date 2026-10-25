@@ -102,6 +102,17 @@ READ_PROMPT = """Transcribe the homework problems in this image exactly as writt
 - Do not solve anything or add comments.
 - If part of the page is unreadable, write [unclear] there."""
 
+NOTES_READ_PROMPT = """Transcribe the notes in this image exactly as written, in Markdown.
+- Keep the structure: titles and section names as headings (# or ##), lists as bullet points, \
+numbered steps and problems as numbered lists.
+- Write math in LaTeX: $...$ inside a sentence, $$...$$ on its own line.
+- For a drawing, graph or diagram, write one short line describing it, like \
+[Diagram: parabola opening up with vertex at (0, 1)].
+- Do not add explanations, corrections or anything that is not on the page.
+- If part of the page is unreadable, write [unclear] there."""
+
+READ_PROMPTS = {"homework": READ_PROMPT, "notes": NOTES_READ_PROMPT}
+
 STUDY_GUIDE_PROMPT = """Make a study guide for the material in this homework. Use Markdown \
 with these sections:
 
@@ -414,10 +425,16 @@ def create_app(db_path=None):
 
     @app.post("/api/homework/read")
     def read_homework():
-        """Turn photos of homework (base64 data URLs) into text the student can check and edit."""
+        """Turn photos of homework or notes (base64 data URLs) into text the student can edit.
+
+        Body: {"images": [...], "kind": "homework" | "notes"}  (kind defaults to homework)
+        """
         images = body().get("images", [])
         if not images:
             return jsonify(error="images is required"), 400
+        prompt = READ_PROMPTS.get(body().get("kind") or "homework")
+        if not prompt:
+            return jsonify(error="kind must be homework or notes"), 400
 
         pages = []
         try:
@@ -428,7 +445,7 @@ def create_app(db_path=None):
                         "role": "user",
                         "content": [
                             {"type": "image_url", "image_url": {"url": image}},
-                            {"type": "text", "text": READ_PROMPT},
+                            {"type": "text", "text": prompt},
                         ],
                     }],
                     temperature=0,

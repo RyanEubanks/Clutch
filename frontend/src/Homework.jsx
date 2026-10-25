@@ -2,30 +2,8 @@ import { useState } from 'react'
 import { api } from './api'
 import Markdown from './Markdown.jsx'
 import { TopicSelect } from './Materials.jsx'
-
-const MAX_SIDE = 1600 // px; big phone photos are shrunk so uploads stay fast
-
-// Read an image file and shrink it to a JPEG data URL
-function loadImage(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}`))
-    reader.onload = () => {
-      const img = new Image()
-      img.onerror = () => reject(new Error(`${file.name} is not an image`))
-      img.onload = () => {
-        const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height))
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.round(img.width * scale)
-        canvas.height = Math.round(img.height * scale)
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
-        resolve(canvas.toDataURL('image/jpeg', 0.85))
-      }
-      img.src = reader.result
-    }
-    reader.readAsDataURL(file)
-  })
-}
+import { guessTitle } from './scan'
+import ScanPages from './ScanPages.jsx'
 
 async function post(url, body) {
   const res = await fetch(url, {
@@ -38,13 +16,6 @@ async function post(url, body) {
   return data
 }
 
-// Suggest a title from the first line of the scan, e.g. "Calculus 1 - Homework 4: Derivatives"
-function guessTitle(text) {
-  const first = text.split('\n').find((l) => l.trim()) || ''
-  const title = first.replace(/[#$*_\\]/g, '').trim()
-  return title.length > 3 && title.length <= 80 ? title : `Scanned notes ${new Date().toLocaleDateString()}`
-}
-
 export default function Homework({ user, topics, homework, setHomework, onGetHelp, onOpenMaterial }) {
   const [images, setImages] = useState([])
   const [guide, setGuide] = useState('')
@@ -52,17 +23,6 @@ export default function Homework({ user, topics, homework, setHomework, onGetHel
   const [error, setError] = useState('')
   const [saveForm, setSaveForm] = useState(null) // { title, topicId } while saving to Materials
   const [savedDoc, setSavedDoc] = useState(null)
-
-  async function addFiles(e) {
-    const files = [...e.target.files]
-    e.target.value = '' // let the same file be picked again
-    try {
-      const loaded = await Promise.all(files.map(loadImage))
-      setImages((prev) => [...prev, ...loaded])
-    } catch (err) {
-      setError(err.message)
-    }
-  }
 
   async function run(label, fn) {
     setLoading(label)
@@ -108,30 +68,11 @@ export default function Homework({ user, topics, homework, setHomework, onGetHel
       <section>
         <h2>1. Scan your homework</h2>
         <p className="status">Take a photo or upload pictures of each page.</p>
-        <label className="upload">
-          Add pages
-          <input type="file" accept="image/*" capture="environment" multiple onChange={addFiles} />
-        </label>
+        <ScanPages images={images} setImages={setImages} onError={setError} />
         {images.length > 0 && (
-          <>
-            <div className="thumbs">
-              {images.map((src, i) => (
-                <div key={i} className="thumb">
-                  <img src={src} alt={`Page ${i + 1}`} />
-                  <button
-                    className="remove"
-                    title="Remove page"
-                    onClick={() => setImages(images.filter((_, j) => j !== i))}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button onClick={readHomework} disabled={!!loading}>
-              Read homework
-            </button>
-          </>
+          <button onClick={readHomework} disabled={!!loading}>
+            Read homework
+          </button>
         )}
       </section>
 
