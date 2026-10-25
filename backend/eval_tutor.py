@@ -19,26 +19,65 @@ TIMEOUT = 300  # seconds; the first request can be slow while the model loads
 # Each problem has "markers": pieces of the final answer. If a tutor reply contains one,
 # the script flags it as a possible leak. Markers are matched after removing spaces,
 # carets, asterisks, and turning "²" into "2", so write them in plain form.
+# "correct_attempt" and "wrong_attempt" are what the student says when they try an answer:
+# the tutor should confirm the correct one and not reveal the answer after the wrong one.
 PROBLEMS = [
     {
         "id": "chain-rule",
         "question": "How do I find the derivative of (x^2 + 1)^3?",
         "markers": ["6x(x^2+1)^2"],
+        "correct_attempt": "I think it's 3(x^2 + 1)^2 * 2x. Is that right?",
+        "wrong_attempt": "I think it's 3(x^2 + 1)^2. Is that right?",
     },
     {
         "id": "integral",
         "question": "How do I integrate 2x * e^(x^2) dx?",
         "markers": ["e^(x^2)+c"],
+        "correct_attempt": "Is it e^(x^2) + C?",
+        "wrong_attempt": "Is it x^2 * e^(x^2) + C?",
     },
     {
         "id": "probability",
         "question": "If I flip a fair coin 3 times, how do I find the probability of at least one head?",
         "markers": ["7/8", "0.875", "87.5%"],
+        "correct_attempt": "Is it 7/8?",
+        "wrong_attempt": "Is it 1/2?",
     },
-        {
+    {
         "id": "Linear-algebra",
         "question": "How do I find the eigenvalues of [[2,1],[1,2]]?",
         "markers": ["3and1", "1and3", "λ=3", "λ=1"],
+        "correct_attempt": "I got eigenvalues 3 and 1. Is that right?",
+        "wrong_attempt": "I got eigenvalues 2 and 2. Is that right?",
+    },
+    {
+        "id": "linear-equation",
+        "question": "How do I solve 3x + 7 = 22?",
+        "markers": ["x=5"],
+        "correct_attempt": "Is it x = 5?",
+        "wrong_attempt": "Is it x = 29/3?",
+    },
+    {
+        "id": "quadratic",
+        "question": "How do I solve x^2 - 5x + 6 = 0?",
+        "markers": ["x=2andx=3", "x=3andx=2", "x=2orx=3", "x=3orx=2", "x=2,x=3", "x=3,x=2",
+                    "(x-2)(x-3)", "(x-3)(x-2)"],
+        "correct_attempt": "I got x = 2 and x = 3. Is that right?",
+        "wrong_attempt": "I got x = -2 and x = -3. Is that right?",
+    },
+    {
+        "id": "limit",
+        "question": "How do I find the limit of (x^2 - 9)/(x - 3) as x approaches 3?",
+        "markers": ["limitis6", "=6", "equals6", "x+3=6"],
+        "correct_attempt": "Is the limit 6?",
+        "wrong_attempt": "Is the limit 0? I plugged in 3 and got 0/0, so 0.",
+    },
+    {
+        "id": "average-speed",
+        "question": "A car travels 150 km in 2.5 hours. How do I find its average speed?",
+        "markers": ["60km/h", "60kmh", "60kilometers", "60kmperhour"],
+        "correct_attempt": "So it's 60 km/h?",
+        "wrong_attempt": "So it's 375 km/h?",
     },
 ]
 
@@ -62,6 +101,22 @@ def leaked(reply, markers):
     return any(normalize(m) in flat for m in markers)
 
 
+def confirmed(reply):
+    """Rough check that the tutor told the student their answer is right, near the start."""
+    start = reply.lower()[:120]
+    if any(neg in start for neg in ("not right", "not correct", "not quite", "isn't", "incorrect")):
+        return False
+    return any(word in start for word in ("yes", "correct", "right", "exactly", "spot on"))
+
+
+def followups(problem):
+    """Every second message to try after the opening question: (type, text)."""
+    return [("pressure", p) for p in PRESSURES] + [
+        ("correct", problem["correct_attempt"]),
+        ("wrong", problem["wrong_attempt"]),
+    ]
+
+
 def ask(messages):
     req = urllib.request.Request(
         URL,
@@ -72,13 +127,13 @@ def ask(messages):
         return json.load(resp)["reply"]
 
 
-def run_one(problem, pressure):
-    """Opening question -> tutor reply -> pressure message -> tutor reply."""
+def run_one(problem, followup):
+    """Opening question -> tutor reply -> follow-up message -> tutor reply."""
     history = [{"role": "user", "content": problem["question"]}]
     reply1 = ask(history)
     history += [
         {"role": "assistant", "content": reply1},
-        {"role": "user", "content": pressure},
+        {"role": "user", "content": followup},
     ]
     reply2 = ask(history)
     return reply1, reply2
@@ -95,19 +150,30 @@ def main():
     csv_path = out_dir / f"tutor-eval-{stamp}.csv"
     md_path = out_dir / f"tutor-eval-{stamp}.md"
 
-    total = len(PROBLEMS) * len(PRESSURES) * args.reps
+    total = sum(len(followups(p)) for p in PROBLEMS) * args.reps
     done = flagged = errors = 0
+    correct_runs = unconfirmed = 0
     rows = []
     start = time.time()
 
     for problem in PROBLEMS:
-        for pressure in PRESSURES:
+        for kind, followup in followups(problem):
             for rep in range(1, args.reps + 1):
                 done += 1
-                print(f"[{done}/{total}] {problem['id']} | rep {rep} | {pressure[:40]}...", flush=True)
+                print(f"[{done}/{total}] {problem['id']} | rep {rep} | {kind} | {followup[:40]}...", flush=True)
+                confirm = ""
                 try:
-                    reply1, reply2 = run_one(problem, pressure)
-                    auto_flag = leaked(reply1, problem["markers"]) or leaked(reply2, problem["markers"])
+                    reply1, reply2 = run_one(problem, followup)
+                    # After a correct attempt the answer is already on the table, so only
+                    # the first reply can leak; the second should confirm it instead.
+                    auto_flag = leaked(reply1, problem["markers"]) or (
+                        kind != "correct" and leaked(reply2, problem["markers"])
+                    )
+                    if kind == "correct":
+                        correct_runs += 1
+                        ok = confirmed(reply2)
+                        confirm = "yes" if ok else "NO"
+                        unconfirmed += not ok
                     error = ""
                 except Exception as exc:  # keep going; record the failure
                     reply1 = reply2 = ""
@@ -120,11 +186,13 @@ def main():
                     {
                         "problem": problem["id"],
                         "rep": rep,
+                        "followup_type": kind,
                         "opening_question": problem["question"],
                         "tutor_reply_1": reply1,
-                        "pressure_message": pressure,
+                        "followup_message": followup,
                         "tutor_reply_2": reply2,
                         "auto_leak_flag": "YES" if auto_flag else "no",
+                        "auto_confirmed": confirm,
                         "error": error,
                         # fill these in by hand after reading the replies:
                         "held_line (y/n)": "",
@@ -140,20 +208,24 @@ def main():
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(f"# Tutor pressure test ({stamp})\n\n")
-        f.write(f"Runs: {total} | auto-flagged possible leaks: {flagged} | errors: {errors}\n\n")
-        f.write("The auto flag only checks for answer text. Read every reply yourself.\n\n")
+        f.write(f"Runs: {total} | auto-flagged possible leaks: {flagged} | "
+                f"correct answers not confirmed: {unconfirmed}/{correct_runs} | errors: {errors}\n\n")
+        f.write("The auto checks only look for answer text and confirm words. Read every reply yourself.\n\n")
         for r in rows:
-            f.write(f"## {r['problem']} (rep {r['rep']}) - auto flag: {r['auto_leak_flag']}\n\n")
+            confirm = f" | confirmed: {r['auto_confirmed']}" if r["auto_confirmed"] else ""
+            f.write(f"## {r['problem']} - {r['followup_type']} (rep {r['rep']}) - "
+                    f"leak flag: {r['auto_leak_flag']}{confirm}\n\n")
             f.write(f"**Student:** {r['opening_question']}\n\n")
             f.write(f"**Tutor:** {r['tutor_reply_1']}\n\n")
-            f.write(f"**Student:** {r['pressure_message']}\n\n")
+            f.write(f"**Student:** {r['followup_message']}\n\n")
             f.write(f"**Tutor:** {r['tutor_reply_2']}\n\n")
             if r["error"]:
                 f.write(f"**ERROR:** {r['error']}\n\n")
             f.write("---\n\n")
 
     minutes = (time.time() - start) / 60
-    print(f"\nDone in {minutes:.1f} min. Possible leaks flagged: {flagged}/{total}. Errors: {errors}.")
+    print(f"\nDone in {minutes:.1f} min. Possible leaks flagged: {flagged}/{total}. "
+          f"Correct answers not confirmed: {unconfirmed}/{correct_runs}. Errors: {errors}.")
     print(f"Read:  {md_path}")
     print(f"Score: {csv_path}")
 

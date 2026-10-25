@@ -1,80 +1,55 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import './App.css'
+import Chat from './Chat.jsx'
+import Homework from './Homework.jsx'
 
 export default function App() {
+  const [tab, setTab] = useState('chat')
   const [messages, setMessages] = useState([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const bottomRef = useRef(null)
-
-  // Scroll to the newest message whenever the chat changes
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
-
-  async function send() {
-    const text = input.trim()
-    if (!text || loading) return
-
-    // The model has no memory, so we send the whole conversation each time
-    const next = [...messages, { role: 'user', content: text }]
-    setMessages(next)
-    setInput('')
-    setLoading(true)
-    setError('')
-
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Request failed')
-      setMessages([...next, { role: 'assistant', content: data.reply }])
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Text of the scanned homework; when set, the tutor keeps the chat on this material
+  const [homework, setHomework] = useState('')
 
   function newChat() {
     setMessages([])
-    setError('')
+  }
+
+  function getHelp() {
+    setMessages([])
+    setTab('chat')
   }
 
   return (
     <div className="chat">
       <div className="chat-header">
         <h1>Tutor</h1>
-        <button className="secondary" onClick={newChat}>New chat</button>
-      </div>
-
-      <div className="messages">
-        {messages.length === 0 && (
-          <p className="status">Ask about a problem you are working on.</p>
+        <div className="tabs">
+          <button className={tab === 'chat' ? 'tab active' : 'tab'} onClick={() => setTab('chat')}>
+            Chat
+          </button>
+          <button
+            className={tab === 'homework' ? 'tab active' : 'tab'}
+            onClick={() => setTab('homework')}
+          >
+            Homework
+          </button>
+        </div>
+        {tab === 'chat' && (
+          <button className="secondary" onClick={newChat}>New chat</button>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
-            {m.content}
-          </div>
-        ))}
-        {loading && <p className="status">Thinking...</p>}
-        {error && <p className="error">{error}</p>}
-        <div ref={bottomRef} />
       </div>
 
-      <div className="input-row">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder="Type your question..."
-        />
-        <button onClick={send} disabled={loading}>Send</button>
-      </div>
+      {tab === 'chat' && homework && (
+        <div className="context-bar">
+          Studying your homework
+          <button className="link" onClick={() => setHomework('')}>Stop using it</button>
+        </div>
+      )}
+
+      {tab === 'chat' ? (
+        <Chat messages={messages} setMessages={setMessages} homework={homework} />
+      ) : (
+        <Homework homework={homework} setHomework={setHomework} onGetHelp={getHelp} />
+      )}
     </div>
   )
 }

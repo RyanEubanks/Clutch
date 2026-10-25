@@ -44,6 +44,9 @@ ONE-TIME SETUP (only the first time, or on a new computer)
      cd frontend
      npm install
 
+   Run npm install again whenever package.json changes (for example after the
+   math rendering packages - react-markdown, remark-math, rehype-katex, katex - were added).
+
 
 -----------------------------------------------------
 EVERY TIME YOU RUN THE APP
