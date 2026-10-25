@@ -32,3 +32,6 @@ node_modules/
 dist/
 user_data/
 
+
+# SQLite database with student chats and progress
+backend/user_data/

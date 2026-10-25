@@ -24,9 +24,12 @@ export default function Chat({
   const [error, setError] = useState('')
   const [ending, setEnding] = useState(false)
   const bottomRef = useRef(null)
+  // Id of a chat this panel created itself. Its first message is still being sent when
+  // onCreated passes the id back as initialId, so it must not be reloaded from the server.
+  const createdId = useRef(null)
 
   useEffect(() => {
-    if (!initialId) return
+    if (!initialId || initialId === createdId.current) return
     let cancelled = false
     api
       .conversation(initialId)
@@ -57,6 +60,7 @@ export default function Chat({
       if (!current) {
         const created = await api.createConversation(user.id, topicId || null)
         current = { ...created, messages: [], review: null }
+        createdId.current = created.id
         setConvo(current)
         onCreated(created.id)
       }
