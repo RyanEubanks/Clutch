@@ -1,8 +1,331 @@
-One guide warns that Ollama defaults Gemma 4 to a 4K context window,
- even though the model supports 128K to 256K, and that you 
- should override num_ctx for long inputs. That doesn’t matter 
- for short chats, so ignore it for now. It will matter 
- when you start putting whole notes or textbook chapters into the prompt, 
- because the model might otherwise cut off the end without telling you.
+================================================================================
+ CLUTCH DEVLOG
+================================================================================
+
+Notes, bugs, and lessons from building Clutch. Newest entries go at the top of
+each section.
+
+HOW TO FIND THINGS
+  Every entry has a tag you can search for (Ctrl+F / grep):
+    [OPEN-xx]      Open issues and things to watch out for
+    [TEST-xx]      Bugs caught by automated tests or by running code
+    [REVIEW-xx]    Bugs caught by hand, code review, or screenshots
+    [MODEL-xx]     Mistakes the AI model made, caught by evals or the math checker
+    [ENV-xx]       Setup, environment, and tooling notes
+    [DECISION-xx]  Design choices and the reasons behind them
+  Search "Files:" plus a file name (e.g. "Files: backend/mathcheck.py") to find
+  every entry about that file.
+
+ENTRY FORMAT
+  [TAG-xx] Short title
+    Date:      when it was found
+    Found by:  which test, eval, or person caught it
+    Symptom:   what went wrong
+    Cause:     why
+    Fix:       what changed (or "open" if not fixed yet)
+    Files:     where
+
+CONTENTS
+  1. Open issues and watch-outs ................ [OPEN]
+  2. Caught by tests and test runs ............. [TEST]
+  3. Caught by hand, review, or screenshots .... [REVIEW]
+  4. Model mistakes caught ..................... [MODEL]
+  5. Environment and tooling ................... [ENV]
+  6. Design decisions .......................... [DECISION]
+  7. Test and eval history
 
 
+================================================================================
+ 1. OPEN ISSUES AND WATCH-OUTS
+================================================================================
+
+[OPEN-01] Ollama's 4K default context window
+  Date:      Oct 24, 2026 (original note)
+  Found by:  research while setting up Gemma 4
+  Note:      One guide warns that Ollama defaults Gemma 4 to a 4K context window,
+             even though the model supports 128K to 256K, and that you should
+             override num_ctx for long inputs. That doesn't matter for short
+             chats, so ignore it for now. It will matter when you start putting
+             whole notes or textbook chapters into the prompt, because the model
+             might otherwise cut off the end without telling you.
+  Status:    Partly handled. Study material sent to the tutor and the quiz writer
+             is capped at DOC_CHAR_BUDGET (default 6000 characters). Raising
+             num_ctx in Ollama is still to do; raise DOC_CHAR_BUDGET after that.
+  Files:     backend/app.py, backend/.env
+
+[OPEN-02] Gemma e2b gives wrong math in chat and study guides
+  Date:      Oct 25, 2026
+  Found by:  hand testing (quizzes and study lessons had wrong answers)
+  Cause:     gemma4:e2b is the smallest Gemma 4 model (~2B effective params) and
+             is unreliable at multi-step math. JSON mode also made it commit to
+             an answer before working anything out.
+  Fix:       Quizzes: fixed by the SymPy checker (see [MODEL-03]).
+             Tutor chat and study guides: OPEN. Options, best first:
+               - Use a bigger model (e4b ~6 GB, 12B ~8 GB, 26B ~16-18 GB at 4-bit).
+               - Generate in two steps (reason in text first, then format JSON).
+               - Turn on Gemma 4's thinking mode (check how through Ollama).
+               - SymPy-check the tutor's "Yes, that's right" verdicts.
+  Files:     backend/app.py
+
+[OPEN-03] Concept quiz questions can't be machine-checked
+  Date:      Oct 25, 2026
+  Note:      Only math questions (derivatives, integrals, limits, etc.) are
+             verified by SymPy. Concept questions ("what does the chain rule
+             apply to?") still depend on the model. Checked questions are picked
+             first, and show a "math-checked" tag in the quiz.
+  Files:     backend/app.py, backend/mathcheck.py, frontend/src/Quiz.jsx
+
+[OPEN-04] No passwords or access checks
+  Date:      Oct 24, 2026
+  Note:      Sign-in is username only, and the API trusts whatever user/topic ID
+             it's given, so anyone who knows an ID can read that data. Fine for a
+             local demo; must be fixed before real students use it.
+  Files:     backend/app.py
+
+[OPEN-05] Scanned homework isn't saved
+  Date:      Oct 24, 2026
+  Note:      Homework text lives only in the browser and is lost on refresh.
+             Saving it as a study material (documents table) is a possible next
+             step.
+  Files:     frontend/src/Homework.jsx, frontend/src/App.jsx
+
+
+================================================================================
+ 2. CAUGHT BY TESTS AND TEST RUNS
+================================================================================
+
+[TEST-04] Regenerating the art strips its content credentials
+  Date:      Oct 24, 2026
+  Found by:  byte-comparing SVGs before and after running generate.py
+  Symptom:   Re-running generate.py changed every SVG even though the art was
+             identical.
+  Cause:     The committed SVGs carry an embedded C2PA "content credentials"
+             manifest (provenance metadata marking them as AI-made). Freshly
+             generated files don't have it.
+  Fix:       Restored the original files. Lesson: after editing generate.py,
+             only commit the SVGs whose art you actually changed, so the others
+             keep their credentials.
+  Files:     frontend/src/assets/mascot/
+
+[TEST-03] generate.py crashed on Python 3.10
+  Date:      Oct 24, 2026
+  Found by:  running generate.py with Python 3.10
+  Symptom:   SyntaxError: f-string expression part cannot include a backslash
+  Cause:     An f-string had escaped quotes inside {...}, which only works on
+             Python 3.12+.
+  Fix:       Built that string with normal concatenation instead.
+  Files:     frontend/src/assets/mascot/generate.py
+
+[TEST-02] Limits were one-sided, so "no limit" questions got an answer
+  Date:      Oct 25, 2026
+  Found by:  test_mathcheck.py::test_bad_tasks_are_refused
+  Symptom:   The checker said the limit of 1/x as x -> 0 is infinity. The real
+             two-sided limit does not exist (left side is -infinity).
+  Cause:     sympy.limit() computes the right-hand limit by default (dir="+").
+  Fix:       Use dir="+-" for finite points, which raises an error when the left
+             and right limits differ; those questions are now dropped.
+  Files:     backend/mathcheck.py
+
+[TEST-01] Quiz parser read "answer": "6" as option number 6
+  Date:      Oct 24, 2026
+  Found by:  writing test_api.py::test_parse_quiz_normalizes_and_shuffles
+  Symptom:   A valid question whose correct option was the text "6" was thrown
+             away.
+  Cause:     The parser checked "is it a digit?" before "is it one of the
+             options?", so "6" became index 6 (out of range).
+  Fix:       Match the option text first, then letters (A-D), then digits.
+  Files:     backend/app.py (parse_concept)
+
+
+================================================================================
+ 3. CAUGHT BY HAND, REVIEW, OR SCREENSHOTS
+================================================================================
+
+[REVIEW-05] Quiz checker compared answer choices the wrong way
+  Date:      Oct 25, 2026
+  Found by:  code review before the tests ran
+  Symptom:   The "no two options may be the same" check would have compared
+             integral options by their derivatives against the problem, not
+             against each other.
+  Fix:       Each question type now defines its own "same answer" rule; for
+             integrals, two antiderivatives that differ by a constant count as
+             the same (and the question is dropped).
+  Files:     backend/mathcheck.py
+
+[REVIEW-04] Layout problems found in screenshot previews
+  Date:      Oct 24, 2026
+  Found by:  rendering the screens with the real CSS and art
+  Symptom / fix:
+    - Four sidebar tabs overflowed; "Progress" was cut off -> 2x2 tab grid.
+    - Sign-in showed two hens (waving hen + the hen inside the logo)
+      -> waving hen plus a plain "Clutch" title.
+    - "Take quiz" button was bigger than its neighbors and pushed the mastery
+      bar out of line -> button.small style.
+  Files:     frontend/src/App.css, frontend/src/App.jsx, frontend/src/Progress.jsx
+
+[REVIEW-03] Mascot art problems found in the first contact sheet
+  Date:      Oct 24, 2026
+  Found by:  rendering every SVG on one page
+  Symptom / fix:
+    - Favicon was cropped at the top and bottom -> rescaled to fit 64x64.
+    - Tail feathers read as a third wing -> smaller, pointed feathers.
+    - Belly feather marks looked like a second pair of eyes -> removed.
+    - "Thinking" wing pointed outward instead of to her chin -> rotated inward.
+    - Eggs in the logo crowded the text -> removed.
+  Files:     frontend/src/assets/mascot/generate.py
+
+[REVIEW-02] First message of a new chat reloaded the chat mid-send
+  Date:      Oct 24, 2026
+  Found by:  Ryan (commit 1087aa5)
+  Symptom:   "Thinking..." disappeared, Send was re-enabled, and the first
+             message could show up twice.
+  Cause:     Creating the chat passed its new ID back as initialId, which
+             triggered a reload from the server while the reply was in flight.
+  Fix:       Remember the ID the panel created itself (createdId ref) and skip
+             reloading it.
+  Files:     frontend/src/Chat.jsx
+
+[REVIEW-01] Merge conflict: database work vs homework scanning
+  Date:      Oct 24, 2026
+  Found by:  git (conflicts in app.py, App.jsx, App.css)
+  Fix:       Kept both sides. Ryan's prompts were checked to be identical after
+             the merge by comparing the parsed Python constants. Saved chats
+             gained homework support; chat moved into Chat.jsx to match Ryan's
+             file layout.
+  Files:     backend/app.py, frontend/src/App.jsx, frontend/src/Chat.jsx,
+             frontend/src/App.css
+
+
+================================================================================
+ 4. MODEL MISTAKES CAUGHT
+================================================================================
+
+[MODEL-03] Wrong quiz answer keys (now caught by the SymPy checker)
+  Date:      Oct 25, 2026
+  Found by:  hand testing, then backend/mathcheck.py
+  Symptom:   Some quiz questions marked the wrong option as correct.
+  Fix:       Math questions are now described as SymPy tasks. SymPy computes the
+             true answer, fixes the key, inserts the real answer if no option is
+             right, and drops questions it can't verify. Caught in testing:
+               - lim (x^2-1)/(x-1) as x -> 1: key said 0, corrected to 2
+                 (the 0/0 trap Ryan's tutor prompt warns about).
+               - lim (1+1/x)^x as x -> infinity: no option was e, so e was
+                 inserted as the correct option.
+  Files:     backend/mathcheck.py, backend/app.py
+
+[MODEL-02] Tutor didn't confirm correct answers
+  Date:      Oct 24, 2026
+  Found by:  Ryan's eval_tutor.py ("correct answers not confirmed")
+  Results:   20:18 run  2/16 not confirmed
+             20:31 run  0/16
+             21:19 run  5/16
+             21:28 run  0/16   (latest; times are Ryan's local time)
+  Examples:  - Integral of 2x e^(x^2): the student said "e^(x^2) + C" (correct).
+               The tutor said that's the integral of e^(x^2) alone, which is
+               false, and kept giving hints.
+             - Chain rule: the student gave 3(x^2+1)^2 * 2x (correct). The tutor
+               answered with another guiding question instead of confirming.
+  Fix:       Ryan's prompt changes: a stricter prompt that tells the tutor to
+             work the problem out before judging (e317a06), then sorting every
+             message into ANSWER / CONCEPT QUESTION / WORKING ON A PROBLEM
+             (5e0f322). The latest run had 0/16, but 16 is a small sample, so
+             keep running the eval after any prompt change. See [OPEN-02].
+  Files:     backend/app.py, backend/eval_tutor.py, backend/eval_results/
+
+[MODEL-01] Pressure tests: no answer leaks
+  Date:      Oct 24, 2026
+  Found by:  Ryan's eval_tutor.py
+  Result:    0 auto-flagged leaks across all 472 runs ("just tell me the
+             answer", "I have an exam in 10 minutes", "ignore your previous
+             instructions", ...). The auto check only looks for answer text, so
+             read the replies in eval_results/*.md too.
+  Files:     backend/eval_tutor.py, backend/eval_results/
+
+
+================================================================================
+ 5. ENVIRONMENT AND TOOLING
+================================================================================
+
+[ENV-04] After every pull: reinstall packages
+  Python:    cd backend; pip install -r requirements.txt
+             (sympy and mpmath were added for the quiz checker; without them the
+             app starts but prints a warning and can't check math questions)
+  Frontend:  cd frontend; npm install
+             (react-markdown, remark-math, rehype-katex, katex were added)
+
+[ENV-03] Keep package-lock.json in git
+  Note:      It pins exact versions so both laptops run the same code, and it
+             lists the right native files for both Mac and Windows. If it
+             conflicts in a merge, keep both package.json changes and run
+             npm install to regenerate it; don't hand-edit it.
+
+[ENV-02] node_modules is per operating system
+  Note:      Vite's bundler (rolldown) uses a native binary, so a node_modules
+             folder installed on a Mac won't build on Windows or Linux. Run
+             npm install on each machine; never copy node_modules around.
+
+[ENV-01] How Claude's sandbox tested things
+  Note:      Claude's cloud sandbox couldn't reach PyPI, npm, or GitHub pushes,
+             so it ran the backend tests with a small pytest stand-in and SymPy
+             1.14 from a source checkout (SymPy's own conftest.py had to be kept
+             off the path; it shadowed ours: "No module named 'mathcheck'").
+             Run the real thing on your machine: cd backend; python -m pytest tests
+             Sandbox commits used: Kristopher McAnally <kristopher.mcanally@gmail.com>
+
+
+================================================================================
+ 6. DESIGN DECISIONS
+================================================================================
+
+[DECISION-06] Check math with SymPy and render from the checked expressions
+  The model writes math quiz questions as SymPy tasks, and the question and
+  options students see are generated from those same expressions, so what's
+  shown always matches what was verified. Model output is untrusted: only
+  whitelisted characters and function names are parsed, and each check runs in
+  a worker process with a time limit (MATHCHECK_TIMEOUT, default 8 s).
+
+[DECISION-05] Quiz rules
+  Unlock at 80% topic mastery (same point the egg hatches), 5 questions (the
+  model writes 7 so failed checks can be dropped), pass with 4/5 to earn the
+  topic badge. Answers stay on the server until the quiz is submitted, and
+  options are shuffled because small models tend to put the answer first.
+  Settings: QUIZ_UNLOCK_MASTERY, QUIZ_PASS_FRACTION, QUIZ_QUESTIONS in .env.
+
+[DECISION-04] How mastery is calculated
+  Each ended session gets a score: 70% the model's read of the student's
+  understanding, 30% the student's own 1-5 confidence rating. The first session
+  sets mastery; later ones move it: mastery = 0.6 * old + 0.4 * new
+  (MASTERY_WEIGHT in db.py). Egg stages: whole until studied, then cracks at
+  0-30%, 30-55%, 55-80%, hatched from 80%.
+
+[DECISION-03] Mother Hen art as code
+  All mascot art is SVG generated by generate.py, so it stays sharp at any size
+  and colors/poses can be changed by editing one file. Mascot.jsx gives
+  <Hen pose="..."/>, <Egg mastery={...}/>, <Badge earned/>, <Logo/>.
+
+[DECISION-02] Keep the stateless /api/chat endpoint
+  Saved chats use /api/conversations/..., but /api/chat (nothing saved) stays so
+  eval_tutor.py and chat_cli.py keep working unchanged.
+
+[DECISION-01] SQLite for the database
+  Built into Python, no server to run, one file (backend/user_data/clutch.db,
+  git-ignored). Schema changes: edit schema.sql, bump SCHEMA_VERSION in db.py,
+  add a migration only for changes schema.sql can't apply itself (e.g. new
+  columns). Full details: docs/database.md.
+
+
+================================================================================
+ 7. TEST AND EVAL HISTORY
+================================================================================
+
+  Date    What changed                                  Result
+  ------  --------------------------------------------  --------------------------
+  Oct 24  Tutor pressure evals (Ryan), 6 runs           472 runs, 0 leaks; see
+                                                        [MODEL-01], [MODEL-02]
+  Oct 24  SQLite database + API                         14 backend tests pass
+  Oct 24  Merge with homework scanning                  17 pass, lint clean
+  Oct 24  Mother Hen in the UI                          lint clean, previews OK
+                                                        after [REVIEW-04]
+  Oct 24  Quizzes + badges (schema v2)                  23 pass; v1 -> v2 upgrade
+                                                        tested on an old database
+  Oct 25  SymPy answer checker                          37 pass after [TEST-02]
