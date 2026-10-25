@@ -102,3 +102,31 @@ def test_timeout_drops_question_and_recovers():
     assert r is None and err == "timed out"
     (r, err), = m.check_questions([q])  # a fresh pool works again
     assert r["answer"] == 0
+
+
+def test_negative_values_are_checked():
+    # These pairs agree for every positive x, so positive-only spot checks call them equal.
+    assert not m.equivalent(m.parse("abs(x)"), m.parse("x"))
+    assert not m.equivalent(m.parse("sqrt(x**2)"), m.parse("x"))
+    assert not m.equivalent(m.parse("log(x**2)"), m.parse("2*log(x)"))
+    assert m.equivalent(m.parse("(x+1)**2"), m.parse("x**2 + 2*x + 1"))
+
+
+def test_sqrt_x_squared_is_not_x():
+    r = check(op="simplify", expr="sqrt(x**2)", options=["x", "x**2", "-x", "2*x"], answer=0)
+    assert r["corrected"] is True and r["model_said"] == "$x$"
+    assert r["options"][r["answer"]] == r"$\left|{x}\right|$"
+    assert r["question"] == r"Which expression is equivalent to $\sqrt{x^{2}}$?"  # shown as written
+
+
+def test_log_abs_x_is_an_antiderivative_of_one_over_x():
+    r = check(op="integrate", expr="1/x", options=["log(abs(x))", "-1/x**2", "x", "exp(x)"], answer=0)
+    assert r["answer"] == 0 and not r["corrected"] and r["model_said"] is None
+
+
+def test_bars_mean_absolute_value():
+    assert m.equivalent(m.parse("ln|x|"), m.parse("log(abs(x))"))
+    r = check(op="integrate", expr="1/x", options=["ln|x| + C", "-1/x**2", "x", "exp(x)"], answer=0)
+    assert r["answer"] == 0 and not r["corrected"]
+    with pytest.raises(m.MathError):
+        m.parse("|x")  # unmatched bar is still refused

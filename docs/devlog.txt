@@ -39,6 +39,16 @@ CONTENTS
  1. OPEN ISSUES AND WATCH-OUTS
 ================================================================================
 
+[OPEN-06] The math checker hasn't been run against the real Gemma yet
+  Date:      Oct 25, 2026
+  Note:      All checker tests use a fake model. Run the real-model eval to see
+             how often Gemma writes checkable math, how often its answer key is
+             wrong, and why questions get dropped:
+               cd backend; python eval_quiz.py            (Ollama running)
+             Results: eval_results/quiz-eval-<time>.md (read) and .csv.
+             Add the results to [MODEL-03] below.
+  Files:     backend/eval_quiz.py
+
 [OPEN-01] Ollama's 4K default context window
   Date:      Oct 24, 2026 (original note)
   Found by:  research while setting up Gemma 4
@@ -93,6 +103,42 @@ CONTENTS
 ================================================================================
  2. CAUGHT BY TESTS AND TEST RUNS
 ================================================================================
+
+[TEST-07] Showing questions "as written" crashed with NameError: 'Pow'
+  Date:      Oct 25, 2026
+  Found by:  test_mathcheck.py::test_definite_evaluate_solve_simplify
+  Symptom:   Every "simplify" question was dropped with
+             "could not parse ...: name 'Pow' is not defined".
+  Cause:     Parsing without evaluating (so sqrt(x^2) isn't displayed as |x|)
+             builds Add/Mul/Pow objects, and those names weren't in the
+             checker's locked-down namespace.
+  Fix:       Added Add, Mul, Pow to the allowed SymPy names.
+  Files:     backend/mathcheck.py
+
+[TEST-06] "ln|x|" was rejected, then parsed as "lnabs(x)"
+  Date:      Oct 25, 2026
+  Found by:  eval_quiz.py dry run, then test_mathcheck.py::test_bars_mean_absolute_value
+  Symptom:   Questions using |x| for absolute value were dropped as unsafe;
+             the first fix turned ln|x| into the unknown name "lnabs".
+  Cause:     "|" isn't on the whitelist, and replacing |x| with abs(x) glued it
+             onto the function name in front of it.
+  Fix:       Replace |...| with (abs(...)) before checking, so ln|x| becomes
+             ln((abs(x))). An unmatched "|" is still refused.
+  Files:     backend/mathcheck.py
+
+[TEST-05] Checker thought |x| and x were the same
+  Date:      Oct 25, 2026
+  Found by:  probing the checker (now test_mathcheck.py::test_negative_values_are_checked)
+  Symptom:   equivalent(|x|, x) and equivalent(sqrt(x^2), x) returned True.
+             A "simplify sqrt(x^2)" question would have accepted x as correct.
+  Cause:     The numeric spot checks only plugged in positive numbers
+             (0.30 to 2.70), and these pairs agree for every positive x.
+  Fix:       Test values now come from both [-2.7, -0.3] and [0.3, 2.7], with at
+             least 3 usable points before trusting the result (otherwise fall
+             back to sympy.simplify). log(x^2) vs 2*log(x) is also now
+             correctly "different". Ordinary forms (sqrt(x), ln x, ln|x|, tan,
+             e^x sin x) still check fine.
+  Files:     backend/mathcheck.py
 
 [TEST-04] Regenerating the art strips its content credentials
   Date:      Oct 24, 2026
@@ -329,3 +375,7 @@ CONTENTS
   Oct 24  Quizzes + badges (schema v2)                  23 pass; v1 -> v2 upgrade
                                                         tested on an old database
   Oct 25  SymPy answer checker                          37 pass after [TEST-02]
+  Oct 25  Checker fixes + eval_quiz.py                  42 pass after [TEST-05],
+                                                        [TEST-06], [TEST-07];
+                                                        eval dry run with a fake
+                                                        model OK

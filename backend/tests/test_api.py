@@ -367,3 +367,16 @@ def test_quiz_prompt_keeps_json_examples_intact(client, model):
     prompt = model.calls[-1]["messages"][0]["content"]
     assert '{"op": "diff", "expr": "(3*x+1)**4"' in prompt
     assert "Write a 7-question" in prompt and "Topic: Chain rule" in prompt
+
+
+def test_quiz_report_explains_every_question():
+    report = []
+    app_module.quiz_questions_from(MATH_QUIZ, report=report)
+    statuses = [e["status"] for e in report]
+    assert len(report) == 7
+    assert statuses.count("dropped") == 1 and "unknown name" in report[3]["error"]
+    assert report[0]["status"] == "corrected" and report[0]["result"]["model_said"] == r"$4 \left(3 x + 1\right)^{3}$"
+    assert report[5]["kind"] == "concept" and report[5]["status"] == "unchecked"
+    bad = []
+    assert app_module.quiz_questions_from("not json", report=bad) == []
+    assert bad[0]["status"] == "bad_json"

@@ -265,19 +265,29 @@ def shuffle_options(q):
     return {**q, "options": [q["options"][i] for i in order], "answer": order.index(q["answer"])}
 
 
-def quiz_questions_from(text):
+def quiz_questions_from(text, report=None):
     """Every usable question in the model's reply.
 
     Math questions (with an "op") are checked with SymPy: the answer key is fixed if the
     model got it wrong, and questions SymPy can't verify are dropped. Concept questions
     can't be checked by a computer, so they pass through with verified=False.
+
+    If `report` is a list, one entry per question the model wrote is appended to it
+    (used by eval_quiz.py to measure how the checker handles real model output).
     """
+    def note(**entry):
+        if report is not None:
+            report.append(entry)
+
     match = re.search(r"\{.*\}", text or "", re.DOTALL)
     try:
         data = json.loads(match.group(0)) if match else {}
     except json.JSONDecodeError:
+        note(kind="reply", status="bad_json", error="reply was not valid JSON")
         return []
     items = [q for q in data.get("questions") or [] if isinstance(q, dict)]
+    if not items:
+        note(kind="reply", status="bad_json", error="no questions in the reply")
 
     math_items = [q for q in items if q.get("op")]
     checked = mathcheck.check_questions(math_items) if (mathcheck and math_items) else []
@@ -286,13 +296,20 @@ def quiz_questions_from(text):
     questions = []
     for q in items:
         if q.get("op"):
-            result, _error = next(math_results, (None, "sympy not installed"))
+            result, error = next(math_results, (None, "sympy not installed"))
             if result:
                 questions.append(shuffle_options(result))
+                note(kind="math", op=q.get("op"), raw=q,
+                     status="corrected" if result["corrected"] else "checked", result=result)
+            else:
+                note(kind="math", op=q.get("op"), raw=q, status="dropped", error=error)
             continue
         concept = parse_concept(q)
         if concept:
             questions.append(shuffle_options(concept))
+            note(kind="concept", raw=q, status="unchecked", result=concept)
+        else:
+            note(kind="concept", raw=q, status="dropped", error="not 4 distinct options with a valid answer")
     return questions
 
 

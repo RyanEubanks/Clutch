@@ -41,7 +41,7 @@ VARS = {c: sp.Symbol(c, real=True) for c in "abcdfghkmnpqrstuvwxyz"}
 LOCALS = {**VARS, **FUNCS}
 GLOBALS = {
     "__builtins__": {},
-    **{name: getattr(sp, name) for name in ("Integer", "Float", "Rational", "Symbol", "Function")},
+    **{name: getattr(sp, name) for name in ("Integer", "Float", "Rational", "Symbol", "Function", "Add", "Mul", "Pow")},
 }
 TRANSFORMS = standard_transformations + (implicit_multiplication_application, convert_xor)
 SAFE = re.compile(r"^[0-9A-Za-z+\-*/^().,= ]+$")
@@ -56,11 +56,18 @@ class MathError(ValueError):
 def clean(text):
     text = str(text).strip().strip("$").strip()
     text = text.replace("−", "-").replace("·", "*").replace("×", "*").replace("π", "pi")
+    # Models often write absolute value as |x| (e.g. ln|x|): turn innermost |...| into abs(...).
+    for _ in range(3):
+        text = re.sub(r"\|([^|]+)\|", r"(abs(\1))", text)
     return re.sub(r"\s+", " ", text)
 
 
-def parse(text):
-    """Parse one expression from model output, refusing anything not on the whitelist."""
+def parse(text, evaluate=True):
+    """Parse one expression from model output, refusing anything not on the whitelist.
+
+    evaluate=False keeps the expression as written (for displaying a question), so e.g.
+    sqrt(x**2) isn't shown already simplified to |x|.
+    """
     text = clean(text)
     if not text or len(text) > MAX_LEN or not SAFE.match(text) or "__" in text:
         raise MathError(f"unsafe or empty expression: {text!r}")
@@ -69,7 +76,7 @@ def parse(text):
             raise MathError(f"unknown name {word!r} in {text!r}")
     try:
         expr = parse_expr(text, local_dict=dict(LOCALS), global_dict=dict(GLOBALS),
-                          transformations=TRANSFORMS, evaluate=True)
+                          transformations=TRANSFORMS, evaluate=evaluate)
     except Exception as exc:  # SymPy raises many exception types for bad input
         raise MathError(f"could not parse {text!r}: {exc}") from exc
     if not isinstance(expr, sp.Expr):
@@ -116,6 +123,14 @@ def _num(value):
     return value
 
 
+def _sample(rng):
+    """A test value in [-2.7, -0.3] or [0.3, 2.7]: both signs, away from 0.
+
+    Negative values matter: x and |x|, or sqrt(x**2) and x, agree for every positive x.
+    """
+    return sp.Rational(rng.randint(30, 270), 100) * rng.choice((1, -1))
+
+
 def equivalent(a, b):
     """True if a and b are the same expression. Numeric spot checks first, then simplify."""
     diff = a - b
@@ -124,8 +139,8 @@ def equivalent(a, b):
     symbols = sorted(diff.free_symbols, key=str)
     rng = random.Random(1234)
     close = tried = 0
-    for _ in range(12):
-        point = {s: sp.Rational(rng.randint(30, 270), 100) for s in symbols}
+    for _ in range(16):
+        point = {s: _sample(rng) for s in symbols}
         try:
             d, ref = _num(diff.subs(point)), _num(b.subs(point))
         except (ValueError, TypeError, ZeroDivisionError):
@@ -136,7 +151,7 @@ def equivalent(a, b):
         close += 1
         if close >= 6:
             return True
-    if tried == 0:
+    if tried < 3:  # too few usable points to trust the spot checks
         try:
             return sp.simplify(diff) == 0
         except Exception:
@@ -253,8 +268,8 @@ def build(task):
             raise MathError("evaluate needs a number")
         return question, truth, parse, same_number, render
 
-    # simplify: which option is equivalent to the expression?
-    question = f"Which expression is equivalent to ${tex(expr)}$?"
+    # simplify: which option is equivalent to the expression? Show it as written.
+    question = f"Which expression is equivalent to ${tex(parse(task.get('expr'), evaluate=False))}$?"
     return question, expr, parse, equivalent, render
 
 
@@ -294,6 +309,7 @@ def check_question(q):
                 raise MathError("two options are the same")
 
     corrected = answer != claimed or not right
+    model_said = render(parse_option(raw_options[claimed])) if (corrected and claimed is not None) else None
     explanation = str(q.get("explanation") or "").strip()
     if corrected or not explanation:
         explanation = (f"Mother Hen double-checked this with a math engine: "
@@ -305,6 +321,7 @@ def check_question(q):
         "explanation": explanation,
         "verified": True,
         "corrected": corrected,
+        "model_said": model_said,  # what the model marked correct, when it was wrong
     }
 
 
