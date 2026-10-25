@@ -1,3 +1,5 @@
+import badge from './assets/mascot/badge.svg'
+import badgeLocked from './assets/mascot/badge-locked.svg'
 import egg0 from './assets/mascot/egg-0.svg'
 import egg1 from './assets/mascot/egg-1.svg'
 import egg2 from './assets/mascot/egg-2.svg'
@@ -47,6 +49,12 @@ export function Egg({ mastery = 0, studied = false, size = 44 }) {
   const stage = !studied ? 0 : mastery >= 0.8 ? 4 : mastery >= 0.55 ? 3 : mastery >= 0.3 ? 2 : 1
   const [src, label] = EGGS[stage]
   return <img src={src} width={size} height={Math.round(size * 7 / 6)} alt={label} title={label} className="egg" />
+}
+
+// A topic badge: gold once earned by passing the topic's quiz, grey until then.
+export function Badge({ earned = false, size = 40, title }) {
+  const label = title || (earned ? 'Badge earned' : 'Badge not earned yet')
+  return <img src={earned ? badge : badgeLocked} width={size} height={size} alt={label} title={label} className="badge" />
 }
 
 export function Logo({ height = 56 }) {

@@ -1,5 +1,7 @@
 import json
+import math
 import os
+import random
 import re
 import sqlite3
 
@@ -9,6 +11,13 @@ from openai import OpenAI
 
 import db
 
+try:
+    import mathcheck  # SymPy answer checking for math quiz questions
+except ImportError:  # sympy not installed yet: run pip install -r requirements.txt
+    mathcheck = None
+    print("WARNING: sympy is not installed, so math quiz questions can't be checked. "
+          "Run: pip install -r requirements.txt")
+
 load_dotenv()
 
 MODEL = os.getenv("MODEL_NAME")
@@ -17,6 +26,11 @@ client = OpenAI(base_url=os.getenv("MODEL_BASE_URL"), api_key="local")
 # Ollama runs models with a small context window by default (see docs/devlog.txt),
 # so cap how much study material goes into each prompt. Raise this once num_ctx is raised.
 DOC_CHAR_BUDGET = int(os.getenv("DOC_CHAR_BUDGET", "6000"))
+
+# Mastery quizzes: unlock at this topic mastery, pass with this fraction correct.
+QUIZ_UNLOCK_MASTERY = float(os.getenv("QUIZ_UNLOCK_MASTERY", "0.8"))
+QUIZ_PASS_FRACTION = float(os.getenv("QUIZ_PASS_FRACTION", "0.8"))
+QUIZ_QUESTIONS = int(os.getenv("QUIZ_QUESTIONS", "5"))
 
 #
 #SYSTEM_PROMPT = (
@@ -122,6 +136,53 @@ REVIEW_PROMPT = (
 )
 
 
+QUIZ_PROMPT = """Write a {n}-question multiple-choice quiz that checks whether a student has \
+mastered this topic.
+
+Subject: {subject}
+Topic: {topic}
+{description}{material}
+There are two kinds of question.
+
+1. MATH: any question with a calculation (derivatives, integrals, limits, solving equations,
+evaluating or simplifying expressions). Do NOT write question text for these. Describe the task
+so a computer can check it, like this:
+{"op": "diff", "expr": "(3*x+1)**4", "var": "x", "options": ["12*(3*x+1)**3", "4*(3*x+1)**3", \
+"12*x*(3*x+1)**3", "(3*x+1)**3"], "answer": 0, "explanation": "Chain rule: 4(3x+1)^3 times 3."}
+
+"op" is one of:
+- "diff": derivative of expr
+- "integrate": indefinite integral of expr
+- "definite": integral of expr from "lower" to "upper" (add those two fields)
+- "limit": limit of expr as var approaches "at" (add the "at" field)
+- "evaluate": the value of expr, at var = "at" if you add an "at" field
+- "simplify": which option is equivalent to expr
+- "solve": solve the equation in expr, e.g. "x**2 - 4 = 0"; options look like "x = 2, x = -2"
+Write expr and EVERY option in Python/SymPy syntax: * to multiply, ** for powers, sqrt(), exp(),
+log(), sin(), cos(), pi. No LaTeX and no $ signs in math questions.
+
+2. CONCEPT: a question about an idea, definition, or reasoning, with no calculation:
+{"question": "...", "options": ["...", "...", "...", "..."], "answer": 1, "explanation": "..."}
+Write any math in concept questions in LaTeX: $...$.
+
+Rules:
+- If the topic involves calculation, make most questions MATH.
+- Every question has exactly 4 different options and exactly one correct option.
+- Wrong options should be mistakes a student might really make.
+- "answer" is the index (0-3) of the correct option.
+- "explanation" says in one or two sentences why the correct option is right.
+
+Reply with JSON only, in this shape: {"questions": [ ...questions... ]}"""
+
+
+def quiz_prompt(**fields):
+    # Plain replace instead of str.format, so the JSON examples' braces stay as they are.
+    prompt = QUIZ_PROMPT
+    for key, value in fields.items():
+        prompt = prompt.replace("{" + key + "}", str(value))
+    return prompt
+
+
 def ask_model(messages, temperature=0.2, json_mode=False):
     """Send messages to the model and return the reply text."""
     kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
@@ -196,6 +257,91 @@ def parse_review(text):
         "strengths": text_field("strengths"),
         "gaps": text_field("gaps"),
     }
+
+
+def shuffle_options(q):
+    """Shuffle so the correct option isn't always in the same spot."""
+    order = random.sample(range(4), 4)
+    return {**q, "options": [q["options"][i] for i in order], "answer": order.index(q["answer"])}
+
+
+def quiz_questions_from(text):
+    """Every usable question in the model's reply.
+
+    Math questions (with an "op") are checked with SymPy: the answer key is fixed if the
+    model got it wrong, and questions SymPy can't verify are dropped. Concept questions
+    can't be checked by a computer, so they pass through with verified=False.
+    """
+    match = re.search(r"\{.*\}", text or "", re.DOTALL)
+    try:
+        data = json.loads(match.group(0)) if match else {}
+    except json.JSONDecodeError:
+        return []
+    items = [q for q in data.get("questions") or [] if isinstance(q, dict)]
+
+    math_items = [q for q in items if q.get("op")]
+    checked = mathcheck.check_questions(math_items) if (mathcheck and math_items) else []
+    math_results = iter(checked)
+
+    questions = []
+    for q in items:
+        if q.get("op"):
+            result, _error = next(math_results, (None, "sympy not installed"))
+            if result:
+                questions.append(shuffle_options(result))
+            continue
+        concept = parse_concept(q)
+        if concept:
+            questions.append(shuffle_options(concept))
+    return questions
+
+
+def parse_quiz(text, expected):
+    """Exactly `expected` questions from one reply, or [] if there aren't enough."""
+    questions = quiz_questions_from(text)
+    return questions[:expected] if len(questions) >= expected else []
+
+
+def parse_concept(q):
+    """Validate a concept (non-math) question. Returns None if it's unusable."""
+    options = [str(o).strip() for o in q.get("options") or [] if str(o).strip()]
+    answer = q.get("answer")
+    # Accept an index, a letter ("B"), or the option text itself.
+    if isinstance(answer, str):
+        a = answer.strip()
+        if a in options:
+            answer = options.index(a)
+        elif len(a) == 1 and a.upper() in "ABCD":
+            answer = "ABCD".index(a.upper())
+        elif a.isdigit():
+            answer = int(a)
+    question = str(q.get("question") or "").strip()
+    if (not question or len(options) != 4 or len(set(options)) != 4
+            or not isinstance(answer, int) or not 0 <= answer < 4):
+        return None
+    return {
+        "question": question,
+        "options": options,
+        "answer": answer,
+        "explanation": str(q.get("explanation") or "").strip(),
+        "verified": False,
+    }
+
+
+def public_quiz(quiz):
+    """Hide answers and explanations until the quiz has been submitted."""
+    quiz = {**quiz, "needed": math.ceil(QUIZ_PASS_FRACTION * quiz["total"] - 1e-9)}
+    if quiz["submitted_at"] is None:
+        quiz = {**quiz, "questions": [
+            {"question": q["question"], "options": q["options"], "verified": q.get("verified", False)}
+            for q in quiz["questions"]
+        ]}
+    return quiz
+
+
+def quiz_unlocked(progress):
+    return bool(progress and progress["sessions_count"]
+                and progress["mastery"] >= QUIZ_UNLOCK_MASTERY)
 
 
 def create_app(db_path=None):
@@ -444,7 +590,13 @@ def create_app(db_path=None):
             db.get_topic_progress(conn, convo["user_id"], convo["topic_id"])
             if convo["topic_id"] else None
         )
-        return jsonify(review=saved, progress=progress)
+        has_badge = bool(convo["topic_id"]) and db.get_badge(conn, convo["user_id"], convo["topic_id"]) is not None
+        return jsonify(
+            review=saved,
+            progress=progress,
+            quiz_unlocked=quiz_unlocked(progress) and not has_badge,
+            has_badge=has_badge,
+        )
 
     # ---------- documents ----------
 
@@ -483,7 +635,97 @@ def create_app(db_path=None):
 
     @app.get("/api/users/<int:user_id>/progress")
     def progress(user_id):
-        return jsonify(db.progress_overview(get_db(), user_id))
+        rows = db.progress_overview(get_db(), user_id)
+        for r in rows:
+            r["quiz_unlocked"] = quiz_unlocked(r)
+            r["quiz_unlock_at"] = QUIZ_UNLOCK_MASTERY
+        return jsonify(rows)
+
+    # ---------- quizzes & badges ----------
+
+    @app.post("/api/topics/<int:topic_id>/quiz")
+    def start_quiz(topic_id):
+        """Return the student's open quiz for this topic, or write a new one."""
+        conn = get_db()
+        topic = db.get_topic(conn, topic_id)
+        if not topic:
+            return not_found("Topic")
+        user_id = topic["user_id"]
+        if not quiz_unlocked(db.get_topic_progress(conn, user_id, topic_id)):
+            return jsonify(
+                error=f"The quiz unlocks at {QUIZ_UNLOCK_MASTERY:.0%} mastery. Keep studying!"
+            ), 403
+
+        existing = db.open_quiz(conn, user_id, topic_id)
+        if existing:
+            return jsonify(public_quiz(existing))
+
+        material = ""
+        docs = db.topic_documents(conn, topic_id)
+        if docs:
+            text = "\n\n".join(d["content"] for d in docs)[:DOC_CHAR_BUDGET]
+            material = f"\nBase the questions on the student's study material:\n<material>\n{text}\n</material>\n"
+        prompt = quiz_prompt(
+            # Ask for a couple extra, since questions that fail the math check are dropped.
+            n=QUIZ_QUESTIONS + 2,
+            subject=topic["subject_name"],
+            topic=topic["name"],
+            description=f"About this topic: {topic['description']}\n" if topic["description"] else "",
+            material=material,
+        )
+        questions, seen = [], set()
+        try:
+            # Small models sometimes return broken JSON or uncheckable math, so keep
+            # collecting good questions over up to two attempts.
+            for _ in range(2):
+                raw = ask_model([{"role": "user", "content": prompt}], temperature=0.4, json_mode=True)
+                for q in quiz_questions_from(raw):
+                    if q["question"] not in seen:
+                        seen.add(q["question"])
+                        questions.append(q)
+                if len(questions) >= QUIZ_QUESTIONS:
+                    break
+        except Exception as exc:
+            return jsonify(error=f"Model request failed: {exc}"), 502
+        # Prefer questions the math engine verified, keeping the model's order otherwise.
+        questions.sort(key=lambda q: not q["verified"])
+        questions = questions[:QUIZ_QUESTIONS]
+        if len(questions) < QUIZ_QUESTIONS:
+            return jsonify(error="Mother Hen couldn't write a quiz this time. Please try again."), 502
+
+        quiz = db.create_quiz(conn, user_id, topic_id, questions)
+        return jsonify(public_quiz(quiz)), 201
+
+    @app.get("/api/quizzes/<int:quiz_id>")
+    def get_quiz(quiz_id):
+        quiz = db.get_quiz(get_db(), quiz_id)
+        return jsonify(public_quiz(quiz)) if quiz else not_found("Quiz")
+
+    @app.post("/api/quizzes/<int:quiz_id>/submit")
+    def submit_quiz(quiz_id):
+        """Body: {"answers": [option index per question]}. Grades and awards the badge."""
+        conn = get_db()
+        quiz = db.get_quiz(conn, quiz_id)
+        if not quiz:
+            return not_found("Quiz")
+        if quiz["submitted_at"] is not None:
+            return jsonify(error="This quiz was already submitted"), 409
+        answers = body().get("answers")
+        if (not isinstance(answers, list) or len(answers) != quiz["total"]
+                or not all(isinstance(a, int) and 0 <= a < 4 for a in answers)):
+            return jsonify(error=f"answers must be {quiz['total']} option indexes (0-3)"), 400
+
+        graded, new_badge = db.submit_quiz(conn, quiz_id, answers, QUIZ_PASS_FRACTION)
+        return jsonify(
+            quiz=graded,
+            new_badge=new_badge,
+            badge=db.get_badge(conn, graded["user_id"], graded["topic_id"]),
+            needed=math.ceil(QUIZ_PASS_FRACTION * graded["total"] - 1e-9),
+        )
+
+    @app.get("/api/users/<int:user_id>/badges")
+    def list_badges(user_id):
+        return jsonify(db.list_badges(get_db(), user_id))
 
     return app
 

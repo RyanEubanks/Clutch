@@ -3,6 +3,7 @@
 Every function takes an open connection as its first argument, so the same code
 works from Flask (one connection per request) and from tests or scripts.
 """
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = BACKEND_DIR / "schema.sql"
 DEFAULT_DB_PATH = BACKEND_DIR / "user_data" / "clutch.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: quizzes + badges (new tables only, created by schema.sql)
 
 # How much a new session review moves topic mastery (0-1). Higher = reacts faster.
 MASTERY_WEIGHT = 0.4
@@ -34,8 +35,8 @@ def init_db(conn):
     """Create tables if missing and run any pending migrations."""
     conn.executescript(SCHEMA_PATH.read_text())
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    # Future migrations go here, e.g.:
-    # if version < 2:
+    # Migrations for changes schema.sql can't apply on its own (e.g. new columns):
+    # if version < 3:
     #     conn.execute("ALTER TABLE topics ADD COLUMN ...")
     if version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -312,13 +313,89 @@ def progress_overview(conn, user_id):
         """SELECT s.id AS subject_id, s.name AS subject_name,
                   t.id AS topic_id, t.name AS topic_name,
                   COALESCE(p.mastery, 0) AS mastery,
+                  b.earned_at AS badge_earned_at,
                   COALESCE(p.sessions_count, 0) AS sessions_count,
                   COALESCE(p.messages_count, 0) AS messages_count,
                   p.last_gaps, p.last_studied_at
            FROM subjects s
            JOIN topics t ON t.subject_id = s.id
            LEFT JOIN topic_progress p ON p.topic_id = t.id AND p.user_id = s.user_id
+           LEFT JOIN badges b ON b.topic_id = t.id AND b.user_id = s.user_id
            WHERE s.user_id = ?
            ORDER BY s.name, t.name""",
+        (user_id,),
+    ))
+
+
+# ---------- quizzes & badges ----------
+
+def create_quiz(conn, user_id, topic_id, questions):
+    cur = conn.execute(
+        "INSERT INTO quizzes (user_id, topic_id, questions_json, total) VALUES (?, ?, ?, ?)",
+        (user_id, topic_id, json.dumps(questions), len(questions)),
+    )
+    conn.commit()
+    return get_quiz(conn, cur.lastrowid)
+
+
+def get_quiz(conn, quiz_id):
+    row = _row(conn.execute(
+        """SELECT q.*, t.name AS topic_name FROM quizzes q
+           JOIN topics t ON t.id = q.topic_id WHERE q.id = ?""",
+        (quiz_id,),
+    ).fetchone())
+    if row:
+        row["questions"] = json.loads(row.pop("questions_json"))
+        answers = row.pop("answers_json")
+        row["answers"] = json.loads(answers) if answers else None
+        row["passed"] = None if row["passed"] is None else bool(row["passed"])
+    return row
+
+
+def submit_quiz(conn, quiz_id, answers, pass_fraction):
+    """Grade a quiz and award the topic badge if it passed. Returns (quiz, new_badge)."""
+    quiz = get_quiz(conn, quiz_id)
+    score = sum(1 for q, a in zip(quiz["questions"], answers) if a == q["answer"])
+    passed = score >= pass_fraction * quiz["total"]
+    conn.execute(
+        """UPDATE quizzes SET answers_json = ?, score = ?, passed = ?, submitted_at = datetime('now')
+           WHERE id = ?""",
+        (json.dumps(answers), score, int(passed), quiz_id),
+    )
+    new_badge = False
+    if passed:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO badges (user_id, topic_id, quiz_id) VALUES (?, ?, ?)",
+            (quiz["user_id"], quiz["topic_id"], quiz_id),
+        )
+        new_badge = cur.rowcount == 1
+    conn.commit()
+    return get_quiz(conn, quiz_id), new_badge
+
+
+def open_quiz(conn, user_id, topic_id):
+    """The student's latest unsubmitted quiz for this topic, if any."""
+    row = conn.execute(
+        """SELECT id FROM quizzes WHERE user_id = ? AND topic_id = ? AND submitted_at IS NULL
+           ORDER BY id DESC LIMIT 1""",
+        (user_id, topic_id),
+    ).fetchone()
+    return get_quiz(conn, row["id"]) if row else None
+
+
+def get_badge(conn, user_id, topic_id):
+    return _row(conn.execute(
+        "SELECT * FROM badges WHERE user_id = ? AND topic_id = ?", (user_id, topic_id)
+    ).fetchone())
+
+
+def list_badges(conn, user_id):
+    return _rows(conn.execute(
+        """SELECT b.*, t.name AS topic_name, s.name AS subject_name, q.score, q.total
+           FROM badges b
+           JOIN topics t ON t.id = b.topic_id
+           JOIN subjects s ON s.id = t.subject_id
+           LEFT JOIN quizzes q ON q.id = b.quiz_id
+           WHERE b.user_id = ? ORDER BY b.earned_at DESC""",
         (user_id,),
     ))

@@ -38,6 +38,11 @@ export const api = {
   deleteDocument: (id) => request(`/documents/${id}`, { method: 'DELETE' }),
 
   progress: (userId) => request(`/users/${userId}/progress`),
+
+  startQuiz: (topicId) => request(`/topics/${topicId}/quiz`, { method: 'POST' }),
+  quiz: (id) => request(`/quizzes/${id}`),
+  submitQuiz: (id, answers) => request(`/quizzes/${id}/submit`, { method: 'POST', body: { answers } }),
+  badges: (userId) => request(`/users/${userId}/badges`),
 }
 
 export function topicOptions(subjects) {

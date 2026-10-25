@@ -92,3 +92,31 @@ CREATE TABLE IF NOT EXISTS topic_progress (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, topic_id)
 );
+
+-- ---------- v2: quizzes and badges ----------
+
+-- A mastery quiz for one topic. Unlocks once topic mastery reaches the threshold
+-- (QUIZ_UNLOCK_MASTERY in app.py). questions_json holds the questions WITH answers;
+-- the API strips the answers until the quiz is submitted.
+CREATE TABLE IF NOT EXISTS quizzes (
+    id             INTEGER PRIMARY KEY,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    topic_id       INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    questions_json TEXT NOT NULL,
+    answers_json   TEXT,                 -- the student's chosen option per question
+    score          INTEGER,              -- number correct, set on submit
+    total          INTEGER NOT NULL,
+    passed         INTEGER CHECK (passed IN (0, 1)),
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    submitted_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_quizzes_user_topic ON quizzes(user_id, topic_id);
+
+-- One badge per student per topic, earned by passing that topic's quiz.
+CREATE TABLE IF NOT EXISTS badges (
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    topic_id  INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    quiz_id   INTEGER REFERENCES quizzes(id) ON DELETE SET NULL,
+    earned_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, topic_id)
+);

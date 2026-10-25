@@ -16,6 +16,8 @@ Schema: `backend/schema.sql`. Data access: `backend/db.py`.
 | `documents` | Study material as plain text, optionally attached to a topic. |
 | `session_reviews` | One per ended session: model-assessed `understanding` (0-1), student `confidence` (1-5), summary, strengths, gaps. |
 | `topic_progress` | Running `mastery` (0-1), session/message counts, last gaps, per student per topic. |
+| `quizzes` | Mastery quizzes: questions with answers (hidden from the API until submitted), the student's answers, score, passed. |
+| `badges` | One per student per topic, earned by passing that topic's quiz. |
 
 Deleting a user/subject/topic cascades. Deleting a topic keeps its chats and docs but unlinks them.
 
@@ -30,6 +32,23 @@ Deleting a user/subject/topic cascades. Deleting a topic keeps its chats and doc
 Topic documents are added to the tutor's system prompt, capped at `DOC_CHAR_BUDGET`
 characters (default 6000) because of Ollama's small default context window (see devlog.txt).
 
+## Quizzes and badges
+
+- A topic's quiz unlocks when mastery reaches `QUIZ_UNLOCK_MASTERY` (default 0.8, same point the egg hatches).
+- The model writes `QUIZ_QUESTIONS` (default 5) multiple-choice questions from the topic and its documents.
+  Bad JSON gets one retry. Options are shuffled so the right answer isn't always A.
+- Answers stay on the server until the quiz is submitted. Passing needs `QUIZ_PASS_FRACTION` (default 0.8, so 4/5).
+- Math questions are checked with SymPy (`backend/mathcheck.py`). The model describes each one as a
+  task (`diff`, `integrate`, `definite`, `limit`, `evaluate`, `simplify`, `solve`) with options in SymPy
+  syntax. SymPy computes the true answer, fixes a wrong answer key, inserts the real answer if no option
+  is right, and drops questions it can't parse or that have two equivalent options. The question and
+  options shown to the student are rendered from the same checked expressions. Concept questions can't
+  be machine-checked; checked ones are preferred and show a "math-checked" tag in the quiz.
+  Expressions are whitelisted before parsing, and each check runs in a worker process with a time
+  limit (`MATHCHECK_TIMEOUT`, default 8 seconds).
+- Passing awards the badge; failing allows a fresh quiz. Asking for a quiz while one is still open returns that one.
+- All three settings can be overridden in `.env`.
+
 ## API
 
 - `POST /api/users` `{username}` - sign in / create
@@ -39,7 +58,10 @@ characters (default 6000) because of Ollama's small default context window (see 
 - `POST /api/conversations/<id>/messages` `{content, homework?}` - saves both turns; scanned homework text is added to the prompt like in `/api/chat`
 - `POST /api/conversations/<id>/end` `{confidence?}` - review + progress update
 - `GET|POST /api/users/<uid>/documents`, `GET|DELETE /api/documents/<id>`
-- `GET /api/users/<uid>/progress`
+- `GET /api/users/<uid>/progress` - includes `quiz_unlocked` and `badge_earned_at` per topic
+- `POST /api/topics/<id>/quiz` - get the open quiz or write a new one (403 until unlocked)
+- `GET /api/quizzes/<id>`, `POST /api/quizzes/<id>/submit` `{answers: [0-3, ...]}` - grade + award badge
+- `GET /api/users/<uid>/badges`
 - `POST /api/chat` `{messages, homework?}` - stateless (nothing saved), used by eval_tutor.py and chat_cli.py
 - `POST /api/homework/read` `{images}`, `POST /api/homework/study-guide` `{homework}` - homework scanning (not stored)
 
@@ -47,10 +69,11 @@ characters (default 6000) because of Ollama's small default context window (see 
 
 Add the change to `schema.sql` for fresh databases, bump `SCHEMA_VERSION` in `db.py`, and add an
 `if version < N:` migration block in `init_db` so existing databases get upgraded too.
+New tables (like v2's quizzes and badges) need no migration block: `schema.sql` creates them on startup.
 
 ## Tests
 
-`cd backend && python -m pytest tests` (uses a fake model, no Ollama needed).
+`cd backend && python -m pytest tests` (uses a fake model, no Ollama needed). Needs `pip install -r requirements.txt` for SymPy.
 
 ## Frontend files
 

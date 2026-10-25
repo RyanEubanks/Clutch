@@ -6,6 +6,7 @@ import Homework from './Homework.jsx'
 import Materials from './Materials.jsx'
 import { Hen, Logo } from './Mascot.jsx'
 import Progress from './Progress.jsx'
+import Quiz from './Quiz.jsx'
 
 const USER_KEY = 'clutch.user'
 
@@ -42,6 +43,8 @@ export default function App() {
   // Changing chatKey remounts the chat panel (switching chats / starting fresh).
   const [chatKey, setChatKey] = useState(0)
   const [newChatTopic, setNewChatTopic] = useState(null)
+  const [quizTopic, setQuizTopic] = useState(null)
+  const [quizKey, setQuizKey] = useState(0)
   // Text of the scanned homework; when set, the tutor keeps the chat on this material
   const [homework, setHomework] = useState('')
   const [error, setError] = useState('')
@@ -79,6 +82,12 @@ export default function App() {
     setActiveId(id)
     setView('chat')
     setChatKey((k) => k + 1)
+  }
+
+  function openQuiz(topicId) {
+    setQuizTopic(topicId)
+    setView('quiz')
+    setQuizKey((k) => k + 1)
   }
 
   function newChat(topicId = null) {
@@ -158,6 +167,7 @@ export default function App() {
             }}
             onChanged={refreshConversations}
             onGoToProgress={() => setView('progress')}
+            onTakeQuiz={openQuiz}
           />
         )}
         {view === 'homework' && (
@@ -166,12 +176,23 @@ export default function App() {
           </div>
         )}
         {view === 'materials' && <Materials user={user} topics={topics} />}
+        {view === 'quiz' && quizTopic && (
+          <Quiz
+            key={quizKey}
+            topicId={quizTopic}
+            onBack={() => setView('progress')}
+            onStudy={(topicId) => newChat(topicId)}
+            onRetry={() => openQuiz(quizTopic)}
+            onBadge={refreshSubjects}
+          />
+        )}
         {view === 'progress' && (
           <Progress
             user={user}
             subjects={subjects}
             onSubjectsChanged={refreshSubjects}
             onStudy={(topicId) => newChat(topicId)}
+            onTakeQuiz={openQuiz}
           />
         )}
       </main>

@@ -153,7 +153,7 @@ assets["egg-3"] = svg(EVB, egg_shadow + chick(60, 76, 26) + bottom_half
                       + f'<g transform="rotate(-18 60 40) translate(-6 -22)">{cap_shape}</g>', "Egg: almost hatched")
 # Stage 4: chick out, standing in its shell, cap off to the side.
 assets["egg-4"] = svg(EVB, egg_shadow + chick(60, 66, 30, happy=True)
-                      + f'<g transform="translate(0 16)">{bottom_half.replace("id=\"b\"", "id=\"b2\"").replace("url(#b)", "url(#b2)")}</g>'
+                      + '<g transform="translate(0 16)">' + bottom_half.replace('id="b"', 'id="b2"').replace("url(#b)", "url(#b2)") + '</g>'
                       + sparkle(16, 26, .7) + sparkle(104, 20, .55), "Egg: hatched! Mastered")
 
 # ---------- logo ----------
@@ -163,6 +163,45 @@ logo = (f'<g transform="translate(4 4) scale(.5)">{hen()}</g>'
         f'<text x="134" y="108" font-family="Nunito, ui-rounded, system-ui, sans-serif" font-size="15" fill="#8A6A55">study with Mother Hen</text>'
 )
 assets["logo"] = svg("0 0 370 128", logo, "Clutch")
+
+# ---------- topic badge (earned by passing a mastery quiz) ----------
+import math as _m
+GOLD = "#FFC83D"; GOLD_DK = "#F0A81E"; RIBBON = COMB; RIBBON_DK = "#D64545"
+
+def rosette(cx, cy, r_out, r_in, n, fill):
+    pts = []
+    for i in range(n * 2):
+        a = _m.pi * i / n - _m.pi / 2
+        r = r_out if i % 2 == 0 else r_in
+        pts.append(f"{cx + r * _m.cos(a):.1f},{cy + r * _m.sin(a):.1f}")
+    return f'<polygon points="{" ".join(pts)}" fill="{fill}" stroke="{INK}" stroke-width="5" stroke-linejoin="round"/>'
+
+def ribbons(color, dark):
+    return (f'<path d="M78 130 L58 206 L76 196 L88 214 L104 140 Z" fill="{color}" stroke="{INK}" stroke-width="5" stroke-linejoin="round"/>'
+            f'<path d="M142 130 L162 206 L144 196 L132 214 L116 140 Z" fill="{color}" stroke="{INK}" stroke-width="5" stroke-linejoin="round"/>'
+            f'<path d="M84 150 L72 196" stroke="{dark}" stroke-width="4" stroke-linecap="round"/>'
+            f'<path d="M136 150 L148 196" stroke="{dark}" stroke-width="4" stroke-linecap="round"/>')
+
+GOLD_EGG = "M110 62 C 128 62 138 90 138 104 C 138 120 126 130 110 130 C 94 130 82 120 82 104 C 82 90 92 62 110 62 Z"
+badge_body = (ribbons(RIBBON, RIBBON_DK)
+              + rosette(110, 96, 78, 66, 16, GOLD)
+              + f'<circle cx="110" cy="96" r="54" fill="{GOLD_DK}" stroke="{INK}" stroke-width="4"/>'
+              + f'<circle cx="110" cy="96" r="44" fill="{CREAM}" stroke="{INK}" stroke-width="4"/>'
+              + f'<g transform="translate(0 -4)"><path d="{GOLD_EGG}" fill="{GOLD}" stroke="{INK}" stroke-width="5"/>'
+              + f'<path d="M95 84 Q99 74 106 70" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".85"/>'
+              + f'<path d="M97 101 L106 110 L124 90" fill="none" stroke="{INK}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></g>'
+              + sparkle(186, 34, .8, "#fff").replace('fill="#fff"', f'fill="{GOLD}" stroke="{INK}" stroke-width="2.5"')
+              + sparkle(34, 150, .6, GOLD))
+assets["badge"] = svg("0 0 220 220", badge_body, "Topic badge")
+
+GREY = "#E4DED6"; GREY_DK = "#CFC6BA"
+locked_body = (ribbons(GREY, GREY_DK)
+               + rosette(110, 96, 78, 66, 16, GREY)
+               + f'<circle cx="110" cy="96" r="54" fill="{GREY_DK}" stroke="{INK}" stroke-width="4"/>'
+               + f'<circle cx="110" cy="96" r="44" fill="#F6F2EC" stroke="{INK}" stroke-width="4"/>'
+               + f'<g transform="translate(0 -4)"><path d="{GOLD_EGG}" fill="{GREY}" stroke="{INK}" stroke-width="5" stroke-dasharray="10 7"/></g>'
+               + f'<text x="110" y="112" text-anchor="middle" font-family="Nunito, ui-rounded, system-ui, sans-serif" font-size="40" font-weight="800" fill="{INK}" opacity=".55">?</text>')
+assets["badge-locked"] = svg("0 0 220 220", f'<g opacity=".9">{locked_body}</g>', "Badge not earned yet")
 
 for name, text in assets.items():
     (OUT / f"{name}.svg").write_text(text)

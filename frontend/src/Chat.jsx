@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import Markdown from './Markdown.jsx'
-import { Hen } from './Mascot.jsx'
+import { Badge, Hen } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
 // One study session. Messages are saved in the database as they're sent; a new chat
@@ -16,6 +16,7 @@ export default function Chat({
   onCreated,
   onChanged,
   onGoToProgress,
+  onTakeQuiz,
 }) {
   const [convo, setConvo] = useState(null)
   const [topicId, setTopicId] = useState(initialTopicId)
@@ -86,7 +87,12 @@ export default function Chat({
     setError('')
     try {
       const r = await api.endConversation(convo.id, confidence)
-      setConvo((prev) => ({ ...prev, review: r.review, ended_at: r.review.created_at }))
+      setConvo((prev) => ({
+        ...prev,
+        review: r.review,
+        ended_at: r.review.created_at,
+        quiz_unlocked: r.quiz_unlocked,
+      }))
       setEnding(false)
       onChanged()
     } catch (e) {
@@ -172,6 +178,16 @@ export default function Chat({
         )}
         {loading && !pending && <p className="status">Loading...</p>}
         {convo?.review && <ReviewCard review={convo.review} />}
+        {convo?.quiz_unlocked && (
+          <div className="unlock">
+            <Badge size={56} />
+            <div>
+              <strong>Quiz unlocked!</strong>
+              <p>You've mastered {convo.topic_name}. Pass the quiz to earn its badge.</p>
+            </div>
+            <button onClick={() => onTakeQuiz(convo.topic_id)}>Take the quiz</button>
+          </div>
+        )}
         {error && <p className="error">{error}</p>}
         <div ref={bottomRef} />
       </div>

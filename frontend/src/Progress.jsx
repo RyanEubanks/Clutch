@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
-import { Egg } from './Mascot.jsx'
+import { Badge, Egg } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
-export default function ProgressView({ user, subjects, onSubjectsChanged, onStudy }) {
+export default function ProgressView({ user, subjects, onSubjectsChanged, onStudy, onTakeQuiz }) {
   const [progress, setProgress] = useState([])
   const [newSubject, setNewSubject] = useState('')
   const [newTopics, setNewTopics] = useState({}) // subjectId -> draft name
@@ -50,12 +50,25 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
     }
   }
 
+  const badges = progress.filter((p) => p.badge_earned_at)
+
   return (
     <div className="page">
       <h2>Progress</h2>
+      {badges.length > 0 && (
+        <div className="badge-shelf">
+          {badges.map((b) => (
+            <figure key={b.topic_id}>
+              <Badge earned size={52} title={`${b.topic_name} badge`} />
+              <figcaption>{b.topic_name}</figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
       <p className="status">
         Mastery updates each time you end a session: the tutor's read of your understanding, blended
-        with your own confidence rating.
+        with your own confidence rating. Reach {Math.round((progress[0]?.quiz_unlock_at ?? 0.8) * 100)}%
+        to unlock a topic's quiz, and pass it to earn the badge.
       </p>
       {error && <p className="error">{error}</p>}
 
@@ -85,6 +98,13 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
                   {p?.last_gaps && <span className="gaps">Work on: {p.last_gaps}</span>}
                 </div>
                 <Meter label="Mastery" value={p?.mastery ?? 0} />
+                {p?.badge_earned_at ? (
+                  <Badge earned size={40} title={`${t.name} badge earned`} />
+                ) : p?.quiz_unlocked ? (
+                  <button className="small" onClick={() => onTakeQuiz(t.id)}>Take quiz</button>
+                ) : (
+                  <Badge size={40} title={`Quiz unlocks at ${Math.round((p?.quiz_unlock_at ?? 0.8) * 100)}% mastery`} />
+                )}
                 <button className="secondary" onClick={() => onStudy(t.id)}>
                   Study
                 </button>
