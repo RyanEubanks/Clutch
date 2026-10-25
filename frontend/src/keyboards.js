@@ -80,6 +80,13 @@ export const KEYBOARDS = {
     name: 'German',
     keys: ['ä', 'ö', 'ü', 'ß', 'Ä', 'Ö', 'Ü', '„', '“'].map((c) => k(c)),
   },
+  writing: {
+    name: 'Writing',
+    keys: [k('—', '—', 'em dash'), k('–', '–', 'en dash, for ranges like 1861–1865'),
+      k('“ ”', '“▮”', 'quotation'), k('‘ ’', '‘▮’', 'quote inside a quote'), k('’', '’', 'apostrophe'),
+      k('…', '…', 'ellipsis'), k('•', '• ', 'bullet'), k('§', '§', 'section'), k('¶', '¶', 'paragraph'),
+      k('°'), k('½'), k('¼'), k('¾'), k('→'), k('≈'), k('é'), k('ñ')],
+  },
 }
 
 // Checked in order, so specific subjects win over general ones ("Linear Algebra" isn't
@@ -94,6 +101,7 @@ const DETECT = [
   ['spanish', /spanish|español|espanol|conjugat/i],
   ['french', /french|français|francais/i],
   ['german', /german|deutsch/i],
+  ['writing', /english|essay|grammar|literar|poetry|reading|writing|histor|civics|government|geograph|psycholog|sociolog|biolog|econom|social studies/i],
   ['algebra', /algebra|equation|polynomial|quadratic|factor|function|linear|exponent|logarithm|inequalit|slope/i],
   ['basic', /math|arithmetic|addition|subtraction|multiplication|division|fraction|times table|decimal|percent/i],
 ]

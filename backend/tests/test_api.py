@@ -729,9 +729,13 @@ def test_demo_profile_is_rebuilt_on_every_sign_in(tmp_path, model):
 
     assert client.post("/api/session", json={"username": "alex"}).status_code == 200  # no password
     first = snapshot()
-    assert first == {"subjects": ["Calculus I", "Linear Algebra"], "chats": 6, "docs": 4}
-    calc, linalg = client.get(f"/api/users/{alex['id']}/subjects").get_json()
-    assert calc["catalog_id"] == "calculus-1" and linalg["catalog_id"] is None  # verified + custom
+    assert sorted(first["subjects"]) == sorted(
+        ["Calculus I", "Linear Algebra", "English Language Arts", "U.S. History", "Psychology"])
+    assert (first["chats"], first["docs"]) == (9, 7)
+    catalog = {s["name"]: s["catalog_id"] for s in client.get(f"/api/users/{alex['id']}/subjects").get_json()}
+    # Every kind of course label: verified, partly verified (English, History), not verified, custom
+    assert catalog == {"Calculus I": "calculus-1", "Linear Algebra": None, "English Language Arts": "english",
+                       "U.S. History": "us-history", "Psychology": "psychology"}
     plan = client.get(f"/api/users/{alex['id']}/planner").get_json()
     assert plan["due"] and plan["tests"][0]["title"] == "Calculus Midterm 2" and plan["tests"][0]["days_left"] == 6
     assert plan["metrics"]["streak"] >= 4

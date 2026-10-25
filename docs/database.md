@@ -84,8 +84,9 @@ characters (default 6000) because of Ollama's small default context window (see 
   new password and prints a new code). That needs the same access that can read the database
   file, so it opens no new way in.
 - **Alex** (`username = alex`, `is_demo = 1`, no password) is the demo. `backend/demo.py`
-  rebuilds Alex's data on every sign-in, dated from today: a 4-day streak ending yesterday,
-  reviews due, a midterm in 6 days, 6 past sessions, 4 materials and a badge. It never
+  rebuilds Alex's data on every sign-in, dated from today: five courses (Calculus I, Linear
+  Algebra, English, U.S. History, Psychology), a 4-day streak ending yesterday, reviews due, a
+  midterm in 6 days, 9 past sessions, 7 materials and 2 badges. It never
   touches another profile. Tests run with `create_app(..., demo_account=False)`.
 
 ## Planner (spaced repetition)
@@ -237,7 +238,8 @@ New tables (like v2's quizzes and badges) need no migration block: `schema.sql` 
 | `App.jsx` | Sign-in check, sidebar, tabs (Study, Planner, Homework, Materials, Progress) |
 | `SignIn.jsx` | Profiles, passwords, recovery codes, the Alex demo |
 | `Chat.jsx` | Saved study sessions, end-of-session review, textbook credit bar |
-| `SymbolKeyboard.jsx`, `keyboards.js` | The symbol keyboard under the chat box (math, calculus, linear algebra, geometry, statistics, physics, chemistry, Spanish, French, German), picked from the session's topic or the chat so far. Keys type `^` for powers and `× ÷ − √ π`, which `mathcheck.py` reads (it turns `√(...)` and `x²` into forms it can check) |
+| `SymbolKeyboard.jsx`, `keyboards.js` | The symbol keyboard under the chat box (math, calculus, linear algebra, geometry, statistics, physics, chemistry, Spanish, French, German, and Writing
+for English, history and similar courses), picked from the session's topic or the chat so far. Keys type `^` for powers and `× ÷ − √ π`, which `mathcheck.py` reads (it turns `√(...)` and `x²` into forms it can check) |
 | `Homework.jsx`, `ScanPages.jsx`, `scan.js` | Scan homework (camera or photos), study guide, "Save to Materials" |
 | `Recording.jsx`, `recorder.js`, `useRecording.js` | Lecture recording (audio worklet, sent to the model in parts under 30 s) |
 | `Materials.jsx` | Study materials (notes, saved homework, lecture notes) with search |

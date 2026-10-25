@@ -1,8 +1,10 @@
-"""The demo profile, Alex: a calculus student six days before a midterm.
+"""The demo profile, Alex: a student in five courses, six days before a calculus midterm.
 
 Signing in as Alex wipes Alex's data and builds it again, with every date relative to today,
 so each demo (and each recording take) starts the same: a 4-day study streak ending yesterday,
 reviews due today, a midterm in 6 days, and a library of notes, lectures and a scanned page.
+The courses (Calculus I, Linear Algebra, English, U.S. History, Psychology) show every course
+label: verified, partly verified, not verified and custom.
 Only the profile flagged is_demo is ever touched here.
 """
 from datetime import date, datetime, timedelta, timezone
@@ -44,6 +46,20 @@ SUBJECTS = {
         "Eigenvalues": "Eigenvalues and eigenvectors of 2x2 and 3x3 matrices",
         "Determinants": "Computing determinants and what they mean",
     },
+    "English Language Arts": {
+        "Grammar": "Sentence structure, punctuation and agreement",
+        "Essay writing": "Thesis statements, structure and evidence",
+        "Literary devices": "Metaphor, simile, symbolism and tone",
+    },
+    "U.S. History": {
+        "The Revolution": "Causes and key events of the American Revolution",
+        "The Constitution": "Branches of government and checks and balances",
+        "Civil War": "Causes, major battles and Reconstruction",
+    },
+    "Psychology": {
+        "Memory": "Encoding, storage and retrieval; short- and long-term memory",
+        "Learning": "Classical and operant conditioning",
+    },
 }
 
 # topic: (mastery, sessions, days since last studied, last gaps)
@@ -53,7 +69,18 @@ PROGRESS = {
     "Integration by parts": (0.30, 1, 1, "Unsure how to choose $u$; skipped the minus sign once"),
     "Derivatives": (0.93, 6, 9, None),
     "Eigenvalues": (0.55, 3, 3, "Sets up $\\det(A - \\lambda I)$ correctly but makes arithmetic slips solving it"),
+    "Grammar": (0.90, 5, 7, None),
+    "Essay writing": (0.55, 2, 3, "Thesis still states a fact instead of an arguable claim"),
+    "Literary devices": (0.65, 3, 3, "Confuses metaphor and simile"),
+    "The Revolution": (0.70, 3, 2, "Mixes up the order of the Stamp Act and the Townshend Acts"),
+    "The Constitution": (0.40, 1, 4, "Mixed up the president's veto with the courts' judicial review"),
+    "Civil War": (0.75, 4, 6, None),
+    "Memory": (0.80, 3, 1, "Unsure how much short-term memory can hold"),
+    "Learning": (0.60, 3, 2, "Mixes up classical and operant conditioning"),
 }
+
+# Topics whose quiz Alex has passed, so they show a badge
+BADGES = ["Derivatives", "Grammar"]
 
 # Study sessions: (days ago, topic, title, confidence 1-5, review, messages as (role, text))
 SESSIONS = [
@@ -96,6 +123,30 @@ SESSIONS = [
       "Asked good conceptual questions", "Still practicing spotting composite functions"),
      [("user", "What is the chain rule?"),
       ("assistant", "The chain rule finds the derivative of a function inside another function:\n\n$$\\frac{d}{dx}\\left[f(g(x))\\right] = f'(g(x))\\cdot g'(x)$$\n\nFor $y = (x^2 + 1)^3$, the outer function is $u^3$ and the inner is $x^2 + 1$. Which part would you differentiate first?")]),
+    (3, "Essay writing", "Writing a thesis statement", 3,
+     (0.55, "Worked on turning a topic into an arguable thesis statement.",
+      "Narrowed a broad topic to a specific claim with two reasons",
+      "Thesis still states a fact instead of an arguable claim"),
+     [("user", "Is \"Social media affects teenagers\" a good thesis for my persuasive essay?"),
+      ("assistant", "It's a start, but right now it's a fact most people already agree with. A strong thesis makes a claim someone could argue against. How does social media affect teenagers, and what do you want your reader to believe about it?"),
+      ("user", "Social media is bad for teenagers because it hurts their sleep and makes them compare themselves to others"),
+      ("assistant", "Much better: it takes a side and previews two reasons. Now make \"bad\" more specific. What should schools or parents actually do about it?")]),
+    (4, "The Constitution", "Checks and balances", 2,
+     (0.4, "Studied how checks and balances limit each branch of government.",
+      "Knew the three branches of government",
+      "Mixed up the president's veto with the courts' judicial review"),
+     [("user", "Can the president declare a law unconstitutional?"),
+      ("assistant", "Not quite. The president can veto a bill before it becomes a law, but that's a different power. Of the three branches, which one interprets the Constitution and decides court cases?"),
+      ("user", "Congress?"),
+      ("assistant", "Not quite. Congress writes the laws. The branch that interprets them includes the Supreme Court. What is that branch called, and what is its power to strike down laws called? (Hint: *Marbury v. Madison*, 1803.)")]),
+    (1, "Memory", "Short-term vs. long-term memory", 4,
+     (0.8, "Compared short-term and long-term memory and how rehearsal moves information between them.",
+      "Explained rehearsal clearly with an everyday example",
+      "Unsure how much short-term memory can hold"),
+     [("user", "What's the difference between short-term and long-term memory?"),
+      ("assistant", "Short-term memory holds a small amount of information briefly: about 15 to 30 seconds without rehearsal, and only a handful of items at once (George Miller's classic estimate is 7, plus or minus 2). Long-term memory can keep information for years, with no known limit. Connecting new information to what you already know helps move it into long-term memory.\n\nQuick check: if you repeat a phone number to yourself until you dial it, which kind of memory are you using?"),
+      ("user", "Short-term memory, and repeating it is rehearsal"),
+      ("assistant", "Yes, that's right. That's maintenance rehearsal: it keeps the number in short-term memory, but it won't necessarily make it stick. What could you do instead to still remember it next week?")]),
 ]
 
 DOCUMENTS = [
@@ -167,6 +218,52 @@ Show your work.
 3. Differentiate $g(x) = x^2 \cdot e^x$
 4. Find the slope of the tangent line to $y = x^3 - 4x$ at $x = 2$
 """),
+    ("Thesis statement checklist", "Essay writing", 6, r"""# Thesis statement checklist
+
+## A strong thesis
+- Makes a claim someone could disagree with
+- Is specific: not just "X is good" or "X is bad"
+- Previews your main reasons
+
+## A pattern to start from
+*Topic + your position + because + reasons*
+
+## Example
+- Weak: "Social media affects teenagers."
+- Strong: "Schools should teach healthy social media habits, because heavy use cuts into teenagers' sleep and fuels constant comparison."
+"""),
+    ("Notes: Causes of the American Revolution", "The Revolution", 9, r"""# Causes of the American Revolution
+
+## Taxes without representation
+- Stamp Act (1765): a tax on printed paper, from newspapers to playing cards
+- Townshend Acts (1767): taxes on imports such as glass, paper and tea
+- Colonists objected: "No taxation without representation"
+
+## Rising tensions
+- Boston Massacre (1770): British soldiers killed five colonists
+- Boston Tea Party (1773): colonists dumped British tea into Boston Harbor
+- Intolerable Acts (1774): Britain punished Massachusetts and closed Boston's port
+
+## War begins
+- Battles of Lexington and Concord (April 1775)
+- Declaration of Independence (July 4, 1776)
+"""),
+    ("Psychology ch. 8: Memory", "Memory", 2, r"""# Memory
+
+## Three stages
+1. Encoding: getting information in
+2. Storage: keeping it over time
+3. Retrieval: getting it back out
+
+## Types of memory
+- Sensory memory: lasts up to a few seconds
+- Short-term memory: about 15 to 30 seconds, roughly 7 plus or minus 2 items
+- Long-term memory: can last years, with no known limit
+
+## Study tips backed by research
+- Spacing study sessions out works better than cramming
+- Testing yourself (retrieval practice) works better than rereading
+"""),
 ]
 
 
@@ -204,9 +301,11 @@ def _build(conn, user_id):
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, topic_ids[name], mastery, sessions, sessions * 6, gaps, _ts(ago, 20), _ts(ago, 20)),
         )
-    # Derivatives is mastered: its quiz was passed, so it has a badge
-    conn.execute("INSERT INTO badges (user_id, topic_id, earned_at) VALUES (?, ?, ?)",
-                 (user_id, topic_ids["Derivatives"], _ts(9, 21)))
+    # Mastered topics whose quiz was passed
+    for name in BADGES:
+        ago = PROGRESS[name][2]
+        conn.execute("INSERT INTO badges (user_id, topic_id, earned_at) VALUES (?, ?, ?)",
+                     (user_id, topic_ids[name], _ts(ago, 21)))
 
     for ago, topic, title, confidence, (understanding, summary, strengths, gaps), messages in SESSIONS:
         convo = conn.execute(
@@ -231,7 +330,11 @@ def _build(conn, user_id):
         )
 
     calc, linalg = subject_ids["Calculus I"], subject_ids["Linear Algebra"]
+    english, history, psych = (subject_ids[s] for s in ("English Language Arts", "U.S. History", "Psychology"))
     events = [
+        ("homework", "Persuasive essay draft", 5, "23:59", english, [], "1,000 words, MLA format", False),
+        ("quiz", "Memory quiz", 8, "11:00", psych, ["Memory", "Learning"], None, False),
+        ("exam", "U.S. History unit test", 12, "10:00", history, ["The Revolution", "The Constitution"], None, False),
         ("exam", "Calculus Midterm 2", 6, "09:30", calc, ["Chain rule", "Limits", "Integration by parts"],
          "Room 214. Bring a calculator.", False),
         ("quiz", "Eigenvalues quiz", 9, "13:00", linalg, ["Eigenvalues", "Determinants"], None, False),
