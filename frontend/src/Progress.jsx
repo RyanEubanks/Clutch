@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { Egg } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
 export default function ProgressView({ user, subjects, onSubjectsChanged, onStudy }) {
@@ -71,6 +72,7 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
             const p = byTopic[t.id]
             return (
               <div key={t.id} className="topic-row">
+                <Egg mastery={p?.mastery ?? 0} studied={Boolean(p?.sessions_count)} />
                 <div className="topic-info">
                   <strong>{t.name}</strong>
                   <span className="status">

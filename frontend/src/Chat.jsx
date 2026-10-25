@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import Markdown from './Markdown.jsx'
+import { Hen } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
 // One study session. Messages are saved in the database as they're sent; a new chat
@@ -139,19 +140,37 @@ export default function Chat({
 
       <div className="messages">
         {messages.length === 0 && !pending && !loading && (
-          <p className="status">
-            {homework
-              ? 'Ask about any problem in your homework.'
-              : 'Ask about a problem you are working on.'}
-          </p>
-        )}
-        {messages.map((m) => (
-          <div key={m.id} className={`bubble ${m.role}`}>
-            {m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}
+          <div className="empty">
+            <Hen pose="wave" size={150} />
+            <p>
+              {homework
+                ? "Cluck cluck! Which homework problem should we work on?"
+                : "Cluck cluck! I'm Mother Hen. What are you working on today?"}
+            </p>
           </div>
-        ))}
+        )}
+        {messages.map((m) =>
+          m.role === 'assistant' ? (
+            <div key={m.id} className="msg-row">
+              <Hen pose="avatar" size={36} className="avatar" />
+              <div className="bubble assistant">
+                <Markdown>{m.content}</Markdown>
+              </div>
+            </div>
+          ) : (
+            <div key={m.id} className="bubble user">
+              {m.content}
+            </div>
+          ),
+        )}
         {pending && <div className="bubble user">{pending}</div>}
-        {loading && <p className="status">{pending ? 'Thinking...' : 'Loading...'}</p>}
+        {loading && pending && (
+          <div className="msg-row thinking">
+            <Hen pose="thinking" size={56} />
+            <span className="status">Mother Hen is thinking...</span>
+          </div>
+        )}
+        {loading && !pending && <p className="status">Loading...</p>}
         {convo?.review && <ReviewCard review={convo.review} />}
         {error && <p className="error">{error}</p>}
         <div ref={bottomRef} />
@@ -192,9 +211,11 @@ export default function Chat({
 }
 
 function ReviewCard({ review }) {
+  const great = review.understanding != null && review.understanding >= 0.75
   return (
     <div className="review">
-      <h3>Session review</h3>
+      <Hen pose={great ? 'happy' : 'proud'} size={84} className="review-hen" />
+      <h3>{great ? 'Egg-cellent work!' : 'Session review'}</h3>
       {review.understanding != null && <Meter label="Understanding" value={review.understanding} />}
       {review.confidence != null && <p>Your confidence: {review.confidence}/5</p>}
       {review.summary && <p>{review.summary}</p>}

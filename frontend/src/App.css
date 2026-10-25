@@ -515,13 +515,110 @@ button.tab.active {
   align-items: stretch;
 }
 
-/* Four tabs fit in the sidebar */
+/* Four tabs fit in the sidebar as a 2x2 grid */
+.sidebar .tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
 .sidebar .tabs button.tab {
-  flex: 1;
-  padding: 0.3rem 0.2rem;
-  font-size: 0.8rem;
+  padding: 0.35rem 0.2rem;
+  font-size: 0.85rem;
 }
 
 .chat .context-bar {
   margin-bottom: 0.25rem;
+}
+
+/* ---------- Mother Hen ---------- */
+
+.hen,
+.egg,
+.logo {
+  display: block;
+  flex-shrink: 0;
+}
+
+.logo {
+  max-width: 100%;
+  width: auto;
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: #5b3a29;
+}
+
+.empty .hen {
+  margin: 0 auto 0.5rem;
+}
+
+.msg-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  align-self: flex-start;
+  max-width: 88%;
+}
+
+.msg-row .bubble.assistant {
+  max-width: none;
+  min-width: 0;
+}
+
+.msg-row .avatar {
+  margin-bottom: 2px;
+}
+
+.msg-row.thinking {
+  align-items: center;
+}
+
+.bob {
+  animation: hen-bob 1.2s ease-in-out infinite;
+}
+
+@keyframes hen-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-4px) rotate(-3deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bob { animation: none; }
+}
+
+.review {
+  position: relative;
+  padding-right: 6.5rem;
+  min-height: 84px;
+}
+
+.review-hen {
+  position: absolute;
+  right: 0.75rem;
+  top: 0.5rem;
+}
+
+.login {
+  align-items: center;
+  text-align: center;
+  margin-top: 10vh;
+}
+
+.login input,
+.login button {
+  align-self: stretch;
+}
+
+.login-hen {
+  margin-bottom: -0.5rem;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 2.4rem;
+  font-weight: 800;
+  color: #5b3a29;
+  letter-spacing: 0.02em;
 }
