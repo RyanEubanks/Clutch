@@ -12,7 +12,10 @@ from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from openai import OpenAI
 
+import courses
 import db
+import factbank
+import groundcheck
 import planner
 
 try:
@@ -197,21 +200,23 @@ REVIEW_PROMPT = (
 )
 
 
-QUIZ_PROMPT = """Write a {n}-question multiple-choice quiz that checks whether a student has \
+QUIZ_HEAD = """Write a {n}-question multiple-choice quiz that checks whether a student has \
 mastered this topic.
 
 Subject: {subject}
 Topic: {topic}
 {description}{material}
-There are two kinds of question.
+Write each question in ONE of the forms below. Prefer the TASK forms whenever the topic allows:
+the app computes their answers itself, so they are always right. Do NOT write question text
+for TASK forms; the app writes it.
+"""
 
-1. MATH: any question with a calculation, including plain arithmetic like 45 + 23
-(derivatives, integrals, limits, solving equations, arithmetic, evaluating or simplifying
-expressions). Do NOT write question text for these. Describe the task
-so a computer can check it, like this:
+QUIZ_SECTIONS = {
+    "math": """
+MATH TASK: any calculation, including plain arithmetic like 45 + 23 (derivatives, integrals,
+limits, solving equations, arithmetic, evaluating or simplifying expressions), like this:
 {"op": "diff", "expr": "(3*x+1)**4", "var": "x", "options": ["12*(3*x+1)**3", "4*(3*x+1)**3", \
 "12*x*(3*x+1)**3", "(3*x+1)**3"], "answer": 0, "explanation": "Chain rule: 4(3x+1)^3 times 3."}
-
 "op" is one of:
 - "diff": derivative of expr
 - "integrate": indefinite integral of expr
@@ -222,14 +227,64 @@ so a computer can check it, like this:
 - "simplify": which option is equivalent to expr
 - "solve": solve the equation in expr, e.g. "x**2 - 4 = 0"; options look like "x = 2, x = -2"
 Write expr and EVERY option in Python/SymPy syntax: * to multiply, ** for powers, sqrt(), exp(),
-log(), sin(), cos(), pi. No LaTeX and no $ signs in math questions.
+log(), sin(), cos(), pi. No LaTeX and no $ signs in math tasks.
+""",
+    "stats": """
+STATISTICS TASK, like this:
+{"op": "mean", "data": [3, 5, 7, 7, 9], "options": ["6.2", "7", "5", "6.5"], "answer": 0}
+"op" is one of: "mean", "median", "mode", "range", "variance", "stdev" (with "data"; add
+"sample": true for the sample variance or standard deviation); "combinations" or
+"permutations" (add "n" and "k"); "binomial" (add "n", "k", "p": the chance of exactly k
+successes in n trials); "normal" (add "mean", "sd", and "lower" and/or "upper");
+"zscore" (add "x", "mean", "sd"). Options are numbers.
+""",
+    "geometry": """
+GEOMETRY TASK, like this:
+{"op": "area", "shape": "circle", "r": 5, "unit": "cm", "options": ["25pi", "10pi", "5pi", \
+"50pi"], "answer": 0}
+- "area": shape "square" (s), "rectangle" (l, w), "triangle" (b, h), "parallelogram" (b, h),
+  "trapezoid" (a, b, h), "circle" (r or d)
+- "perimeter": "square" (s), "rectangle" (l, w), "triangle" (a, b, c), "circle" (r or d)
+- "volume": "cube" (s), "box" (l, w, h), "cylinder" (r, h), "sphere" (r), "cone" (r, h)
+- "hypotenuse" (a, b); "leg" (c = hypotenuse, a = the known leg); "missing_angle" ("angles":
+  two angles of a triangle); "angle_sum" or "regular_angle" ("sides"); "distance"
+  ("points": [[x1, y1], [x2, y2]])
+"unit" is optional (cm, m, in, ft). Options are numbers, and may use pi.
+""",
+    "physics": None,  # filled in from sciencecheck.LAWS below
+    "chemistry": """
+CHEMISTRY TASK, like this:
+{"op": "molar_mass", "formula": "H2SO4", "options": ["98.08 g/mol", "96.06 g/mol", \
+"49.04 g/mol", "100.1 g/mol"], "answer": 0}
+"op" is one of: "molar_mass" (formula); "moles" (formula, grams); "grams" (formula, moles);
+"ph" ("h" = [H+] in mol/L, or "ph" to ask for [H+]); "balance" ("equation" like
+"CH4 + O2 -> CO2 + H2O"; options are coefficient lists like "1, 2, 1, 2").
+""",
+    "spanish": """
+SPANISH CONJUGATION TASK (present tense only), like this:
+{"op": "conjugate", "verb": "tener", "person": "nosotros", "tense": "present", \
+"options": ["tenemos", "tienemos", "tenimos", "tienen"], "answer": 0}
+"person" is one of: yo, tú, él, nosotros, vosotros, ellos. Use common verbs.
+""",
+    "english": """
+ENGLISH TASK, like this:
+{"op": "english_verb", "verb": "swim", "form": "past", "options": ["swam", "swum", \
+"swimmed", "swims"], "answer": 0}
+Ops: "english_verb" (an irregular verb; "form" is "past" or "past_participle") and "plural"
+(an irregular noun, e.g. {"op": "plural", "noun": "mouse", ...}).
+""",
+}
 
-2. CONCEPT: a question about an idea, definition, or reasoning, with no calculation:
+QUIZ_CONCEPT = """
+CONCEPT: a question about an idea, definition, fact, or reasoning:
 {"question": "...", "options": ["...", "...", "...", "..."], "answer": 1, "explanation": "..."}
 Write any math in concept questions in LaTeX: $...$.
-
+"""
+QUIZ_CONCEPT_SOURCE = """For every CONCEPT question, also add "source": the exact sentence from the
+student's material that shows the answer, copied word for word. The app checks it.
+"""
+QUIZ_TAIL = """
 Rules:
-- If the topic involves calculation, make most questions MATH.
 - Every question has exactly 4 different options and exactly one correct option.
 - Wrong options should be mistakes a student might really make.
 - "answer" is the index (0-3) of the correct option.
@@ -238,12 +293,57 @@ Rules:
 Reply with JSON only, in this shape: {"questions": [ ...questions... ]}"""
 
 
-def quiz_prompt(**fields):
+def _physics_section():
+    import sciencecheck
+    laws = "\n".join(
+        f"- {name} (" + ", ".join(f"{v} {desc}" for v, (desc, _) in law["vars"].items()) + ")"
+        for name, law in sciencecheck.LAWS.items())
+    return f"""
+PHYSICS TASK (the app solves it with units; give no formula), like this:
+{{"op": "physics", "law": "kinetic_energy", "given": {{"m": "2 kg", "v": "3 m/s"}}, "find": "K", \
+"unit": "J", "options": ["9 J", "6 J", "18 J", "3 J"], "answer": 0}}
+"law" is one of these (its variables in parentheses). "given" has every variable except
+"find", each with a unit (m, cm, km, s, min, h, kg, g, N, J, kJ, W, A, V, ohm, Hz, Pa, L,
+m/s, km/h, m/s^2, kg/m^3, m^2, m^3). Use g = "9.8 m/s^2" for gravity.
+{laws}
+"""
+
+
+def build_quiz_prompt(families, has_material, **fields):
+    """The quiz prompt with only the TASK forms this course uses (shorter prompts work
+    better with a small model)."""
+    parts = [QUIZ_HEAD]
+    for family in families:
+        if mathcheck is None:
+            break  # nothing can check tasks without SymPy
+        parts.append(_physics_section() if family == "physics" else QUIZ_SECTIONS[family])
+    parts.append(QUIZ_CONCEPT)
+    if has_material:
+        parts.append(QUIZ_CONCEPT_SOURCE)
+    parts.append(QUIZ_TAIL)
+    return quiz_prompt(template="".join(parts), **fields)
+
+
+def quiz_prompt(template=None, **fields):
     # Plain replace instead of str.format, so the JSON examples' braces stay as they are.
-    prompt = QUIZ_PROMPT
+    prompt = template or QUIZ_HEAD + QUIZ_SECTIONS["math"] + QUIZ_CONCEPT + QUIZ_TAIL
     for key, value in fields.items():
         prompt = prompt.replace("{" + key + "}", str(value))
     return prompt
+
+
+COURSE_MATCH_PROMPT = """A student wants to add a course called: "{query}"
+
+Here are the standard courses (id: name, area, level; usual topics):
+{catalog}
+
+Which standard courses best fit what the student typed? Rules:
+- Pick at most 3, best first. Only use ids from the list. If nothing fits, return none.
+- If what they typed is a topic INSIDE a course (like "Addition" inside Elementary Math,
+  or "Chain rule" inside Calculus I), set "as_topic" to true for that course.
+- "why" is one short sentence for the student.
+
+Reply with JSON only: {{"matches": [{{"id": "...", "as_topic": true, "why": "..."}}]}}"""
 
 
 def ask_model(messages, temperature=0.2, json_mode=False):
@@ -407,12 +507,15 @@ def shuffle_options(q):
     return {**q, "options": [q["options"][i] for i in order], "answer": order.index(q["answer"])}
 
 
-def quiz_questions_from(text, report=None):
+def quiz_questions_from(text, report=None, material=None):
     """Every usable question in the model's reply.
 
     Math questions (with an "op") are checked with SymPy: the answer key is fixed if the
     model got it wrong, and questions SymPy can't verify are dropped. Concept questions
     can't be checked by a computer, so they pass through with verified=False.
+
+    With `material` (the topic's notes), concept questions that quote a "source" sentence
+    are checked against the notes (groundcheck.py).
 
     If `report` is a list, one entry per question the model wrote is appended to it
     (used by eval_quiz.py to measure how the checker handles real model output).
@@ -456,6 +559,15 @@ def quiz_questions_from(text, report=None):
             continue
         concept = concepts[i]
         result, error = arith_results.get(i, (None, None))
+        if not result and concept and material and q.get("source"):
+            try:
+                result = groundcheck.check_grounded({**q, **concept}, material)
+                note(kind="notes", raw=q, status="corrected" if result["corrected"] else "checked",
+                     result=result)
+                questions.append(shuffle_options(result))
+                continue
+            except groundcheck.MathError as exc:
+                error = str(exc)
         if result:
             result["numeric"] = True
             questions.append(shuffle_options(result))
@@ -463,8 +575,7 @@ def quiz_questions_from(text, report=None):
                  status="corrected" if result["corrected"] else "checked", result=result)
         elif concept:
             questions.append(shuffle_options(concept))
-            note(kind="concept", raw=q, status="unchecked", result=concept,
-                 error=error if concept["numeric"] else None)
+            note(kind="concept", raw=q, status="unchecked", result=concept, error=error)
         else:
             note(kind="concept", raw=q, status="dropped", error="not 4 distinct options with a valid answer")
     return questions
@@ -515,8 +626,10 @@ def public_quiz(quiz):
     quiz = {**quiz, "needed": math.ceil(QUIZ_PASS_FRACTION * quiz["total"] - 1e-9),
             "math_checker": mathcheck is not None}
     if quiz["submitted_at"] is None:
+        # Answers, explanations and note quotes stay hidden until the quiz is submitted.
         quiz = {**quiz, "questions": [
-            {"question": q["question"], "options": q["options"], "verified": q.get("verified", False)}
+            {"question": q["question"], "options": q["options"], "verified": q.get("verified", False),
+             "checked_by": q.get("checked_by") if q.get("verified") else None}
             for q in quiz["questions"]
         ]}
     return quiz
@@ -527,12 +640,80 @@ def quiz_unlocked(progress):
                 and progress["mastery"] >= QUIZ_UNLOCK_MASTERY)
 
 
+def with_course(subject):
+    """Add the catalog course (or None) and whether it's verified to a subject dict."""
+    course = courses.get(subject.get("catalog_id"))
+    subject["course"] = courses.public(course) if course else None
+    subject["verified"] = bool(course and course["verified"])
+    subject["verification"] = course["verification"] if course else None
+    return subject
+
+
+def suggest_courses(query):
+    """Catalog courses for what a student typed, best first.
+
+    Combines Gemma (understands "times tables" means multiplication) with a keyword
+    match (fast, and still works if the model is slow or returns something unusable).
+    Exact name/topic keyword hits go first, since they're certain.
+    """
+    keyword = courses.keyword_matches(query, limit=5)
+    model_picks, source = [], "keywords"
+    catalog = "\n".join(
+        f"- {c['id']}: {c['name']}, {c['area']}, {c['level']}; {', '.join(c['topics'])}"
+        for c in courses.CATALOG
+    )
+    try:
+        raw = ask_model([{"role": "user", "content": COURSE_MATCH_PROMPT.format(
+            query=query.replace('"', "'"), catalog=catalog)}], temperature=0, json_mode=True)
+        match = re.search(r"\{.*\}", raw or "", re.DOTALL)
+        data = json.loads(match.group(0)) if match else {}
+        for m in data.get("matches") or []:
+            if isinstance(m, dict) and courses.get(str(m.get("id"))):
+                model_picks.append(m)
+        source = "model+keywords"
+    except Exception:  # model offline, slow, or not JSON: keyword matches still work
+        pass
+
+    ordered, why = [], {}
+    for course, score in keyword:
+        if score >= 8:
+            ordered.append(course["id"])
+    for m in model_picks:
+        ordered.append(m["id"])
+        why.setdefault(m["id"], str(m.get("why") or "").strip())
+    ordered += [course["id"] for course, _ in keyword]
+    model_topic = {m["id"] for m in model_picks if m.get("as_topic") is True}
+
+    suggestions, seen = [], set()
+    for course_id in ordered:
+        if course_id in seen:
+            continue
+        seen.add(course_id)
+        course = courses.get(course_id)
+        is_course = courses._norm(query) == courses._norm(course["name"])
+        topic = courses.matching_topic(course, query)
+        as_topic = not is_course and (topic is not None or course_id in model_topic)
+        suggestions.append({
+            "course": courses.public(course),
+            "as_topic": as_topic,
+            "topic": (topic or query.strip()) if as_topic else None,
+            "why": why.get(course_id) or (
+                f"{topic} is a topic in {course['name']}." if topic else
+                f"Matches \"{query.strip()}\"."),
+        })
+        if len(suggestions) == 3:
+            break
+    return suggestions, source
+
+
 def create_app(db_path=None):
     app = Flask(__name__)
     app.config["DATABASE_PATH"] = db_path or db.db_path()
 
     conn = db.connect(app.config["DATABASE_PATH"])
     db.init_db(conn)
+    # Courses named exactly like a standard course ("Elementary Math") get linked to it.
+    db.link_catalog_names(conn, {c["name"].lower(): c["id"] for c in courses.CATALOG})
     conn.close()
 
     def get_db():
@@ -700,16 +881,68 @@ def create_app(db_path=None):
 
     @app.get("/api/users/<int:user_id>/subjects")
     def list_subjects(user_id):
-        return jsonify(db.list_subjects_with_topics(get_db(), user_id))
+        return jsonify([with_course(s) for s in db.list_subjects_with_topics(get_db(), user_id)])
 
     @app.post("/api/users/<int:user_id>/subjects")
     def create_subject(user_id):
-        name = (body().get("name") or "").strip()
+        """Body: {"name": "..."} for a custom course, or {"catalog_id": "...", "topic": "..."}
+        to add a standard course (its name comes from the catalog). "topic" is optional and
+        is added inside the course; if the student already has that course, the topic is
+        added to it instead of creating a duplicate."""
+        conn = get_db()
+        if not db.get_user(conn, user_id):
+            return not_found("User")
+        data = body()
+        catalog_id = data.get("catalog_id")
+        course = courses.get(catalog_id) if catalog_id else None
+        if catalog_id and not course:
+            return jsonify(error="unknown catalog course"), 400
+        name = course["name"] if course else (data.get("name") or "").strip()
         if not name:
             return jsonify(error="name is required"), 400
-        if not db.get_user(get_db(), user_id):
-            return not_found("User")
-        return jsonify(db.create_subject(get_db(), user_id, name)), 201
+
+        subject = db.find_subject(conn, user_id, name) if course else None
+        created = subject is None
+        if created:
+            subject = db.create_subject(conn, user_id, name, catalog_id)
+        elif course and subject.get("catalog_id") != catalog_id:
+            subject = db.set_subject_catalog(conn, subject["id"], catalog_id)
+
+        topic = None
+        topic_name = (data.get("topic") or "").strip()
+        if topic_name:
+            topic = db.find_topic(conn, subject["id"], topic_name) or db.create_topic(
+                conn, subject["id"], topic_name)
+        return jsonify(with_course(subject) | {"topic": topic, "created": created}), (201 if created else 200)
+
+    # ---------- course catalog ----------
+
+    @app.get("/api/courses")
+    def list_courses():
+        return jsonify([courses.public(c) for c in courses.CATALOG])
+
+    @app.post("/api/courses/suggest")
+    def suggest():
+        """Body: {"query": "what the student typed"}. Returns standard courses that fit."""
+        query = (body().get("query") or "").strip()
+        if not query:
+            return jsonify(error="query is required"), 400
+        if len(query) > 120:
+            return jsonify(error="query is too long"), 400
+        suggestions, source = suggest_courses(query)
+        return jsonify(query=query, suggestions=suggestions, source=source)
+
+    @app.patch("/api/subjects/<int:subject_id>")
+    def link_subject(subject_id):
+        """Body: {"catalog_id": "..." or null}. Links a course to a standard course (it keeps
+        its own name), or unlinks it."""
+        conn = get_db()
+        if not db.get_subject(conn, subject_id):
+            return not_found("Subject")
+        catalog_id = body().get("catalog_id")
+        if catalog_id is not None and not courses.get(catalog_id):
+            return jsonify(error="unknown catalog course"), 400
+        return jsonify(with_course(db.set_subject_catalog(conn, subject_id, catalog_id)))
 
     @app.delete("/api/subjects/<int:subject_id>")
     def delete_subject(subject_id):
@@ -888,6 +1121,8 @@ def create_app(db_path=None):
         for r in rows:
             r["quiz_unlocked"] = quiz_unlocked(r)
             r["quiz_unlock_at"] = QUIZ_UNLOCK_MASTERY
+            course = courses.get(r.get("catalog_id"))
+            r["verified"] = bool(course and course["verified"])
         return jsonify(rows)
 
     # ---------- planner: calendar events, spaced repetition, metrics ----------
@@ -1015,36 +1250,46 @@ def create_app(db_path=None):
         if existing:
             return jsonify(public_quiz(existing))
 
-        material = ""
+        material, notes = "", ""
         docs = db.topic_documents(conn, topic_id)
         if docs:
-            text = "\n\n".join(d["content"] for d in docs)[:DOC_CHAR_BUDGET]
-            material = f"\nBase the questions on the student's study material:\n<material>\n{text}\n</material>\n"
-        prompt = quiz_prompt(
-            # Ask for a couple extra, since questions that fail the math check are dropped.
+            notes = "\n\n".join(d["content"] for d in docs)[:DOC_CHAR_BUDGET]
+            material = f"\nBase the questions on the student's study material:\n<material>\n{notes}\n</material>\n"
+        prompt = build_quiz_prompt(
+            courses.families(topic["catalog_id"]),
+            bool(notes),
+            # Ask for a couple extra, since questions that fail the checks are dropped.
             n=QUIZ_QUESTIONS + 2,
             subject=topic["subject_name"],
             topic=topic["name"],
             description=f"About this topic: {topic['description']}\n" if topic["description"] else "",
             material=material,
         )
+        # Fact-bank questions (social studies) are right by construction.
+        facts = factbank.questions_for(topic["catalog_id"], topic["name"], QUIZ_QUESTIONS)
         questions, seen = [], set()
+        model_error = None
         try:
             # Small models sometimes return broken JSON or uncheckable math, so keep
             # collecting good questions over up to two attempts.
             for _ in range(2):
                 raw = ask_model([{"role": "user", "content": prompt}], temperature=0.4, json_mode=True)
-                for q in quiz_questions_from(raw):
+                for q in quiz_questions_from(raw, material=notes or None):
                     if q["question"] not in seen:
                         seen.add(q["question"])
                         questions.append(q)
-                if len(questions) >= QUIZ_QUESTIONS:
+                if sum(q["verified"] for q in questions) + len(facts) >= QUIZ_QUESTIONS:
                     break
         except Exception as exc:
-            return jsonify(error=f"Model request failed: {exc}"), 502
-        # Prefer questions the math engine verified; unchecked number questions go last.
-        questions.sort(key=lambda q: 0 if q["verified"] else (2 if q.get("numeric") else 1))
-        questions = questions[:QUIZ_QUESTIONS]
+            model_error = exc
+        if model_error and len(facts) < QUIZ_QUESTIONS:
+            return jsonify(error=f"Model request failed: {model_error}"), 502
+        # Checked questions first (the model's, then fact-bank ones), then unchecked ones;
+        # unchecked number questions go last.
+        checked = [q for q in questions if q["verified"]]
+        unchecked = sorted((q for q in questions if not q["verified"]),
+                           key=lambda q: 1 if q.get("numeric") else 0)
+        questions = (checked + [f for f in facts if f["question"] not in seen] + unchecked)[:QUIZ_QUESTIONS]
         if len(questions) < QUIZ_QUESTIONS:
             return jsonify(error="Mother Hen couldn't write a quiz this time. Please try again."), 502
 

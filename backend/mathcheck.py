@@ -207,6 +207,12 @@ def var_of(task, expr):
 
 
 def build(task):
+    if str(task.get("op") or "").strip().lower() not in OPS:
+        raise MathError(f"unknown op {task.get('op')!r}")
+    return _build(task)
+
+
+def _build(task):
     """Describe a task: (question_tex, truth, parse_option, same, render_option).
 
     same(a, b) says whether two answers count as the same answer for this kind of task.
@@ -284,24 +290,53 @@ def build(task):
     return question, expr, parse, equivalent, render
 
 
-def check_question(q):
-    """Verify one math question. Returns a clean question dict, or raises MathError.
+def _claimed_index(claimed):
+    """The model's "answer" as an option index 0-3 (accepts 2, "2", "C"), or None."""
+    if isinstance(claimed, str) and claimed.strip().isdigit():
+        claimed = int(claimed.strip())
+    if isinstance(claimed, str) and len(claimed.strip()) == 1 and claimed.strip().upper() in "ABCD":
+        claimed = "ABCD".index(claimed.strip().upper())
+    if not isinstance(claimed, int) or isinstance(claimed, bool) or not 0 <= claimed < 4:
+        return None
+    return claimed
 
-    Result keys: question, options, answer, explanation, verified (True), corrected.
+
+def checker_for(op):
+    """Which checker handles an op: 'math' (this file), 'value' (valuecheck: statistics,
+    geometry, physics, chemistry) or 'text' (langcheck: Spanish, English). None if unknown."""
+    import langcheck  # noqa: F401  (imported here: those modules import this one)
+    import sciencecheck  # noqa: F401
+    import valuecheck
+    op = str(op or "").strip().lower()
+    if op in OPS:
+        return "math"
+    if op in valuecheck.BUILDERS:
+        return "value"
+    if op in langcheck.BUILDERS:
+        return "text"
+    return None
+
+
+def check_question(q):
+    """Verify one task-style question. Returns a clean question dict, or raises MathError.
+
+    Result keys: question, options, answer, explanation, verified (True), corrected,
+    model_said, checked_by.
     """
+    kind = checker_for(q.get("op"))
+    if kind == "value":
+        import valuecheck
+        return valuecheck.check_value_task(q)
+    if kind == "text":
+        import langcheck
+        return langcheck.check_text_task(q)
     question, truth, parse_option, same, render = build(q)
     raw_options = q.get("options") or []
     if len(raw_options) != 4:
         raise MathError("need exactly 4 options")
     options = [parse_option(o) for o in raw_options]
 
-    claimed = q.get("answer")
-    if isinstance(claimed, str) and claimed.strip().isdigit():
-        claimed = int(claimed.strip())
-    if isinstance(claimed, str) and len(claimed.strip()) == 1 and claimed.strip().upper() in "ABCD":
-        claimed = "ABCD".index(claimed.strip().upper())
-    if not isinstance(claimed, int) or not 0 <= claimed < 4:
-        claimed = None
+    claimed = _claimed_index(q.get("answer"))
 
     right = [i for i, o in enumerate(options) if _safe(same, o, truth)]
     if len(right) > 1:
@@ -333,6 +368,7 @@ def check_question(q):
         "verified": True,
         "corrected": corrected,
         "model_said": model_said,  # what the model marked correct, when it was wrong
+        "checked_by": "math",
     }
 
 
@@ -473,6 +509,7 @@ def check_arithmetic(q):
         "verified": True,
         "corrected": corrected,
         "model_said": model_said,
+        "checked_by": "math",
     }
 
 

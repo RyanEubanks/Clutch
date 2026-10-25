@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { CourseSuggestions, VerifiedChip } from './Courses.jsx'
 import { Badge, Egg } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
@@ -7,6 +8,8 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
   const [progress, setProgress] = useState([])
   const [newSubject, setNewSubject] = useState('')
   const [newTopics, setNewTopics] = useState({}) // subjectId -> draft name
+  const [adding, setAdding] = useState('') // course name being matched against the catalog
+  const [linking, setLinking] = useState(null) // custom subject being linked to a standard course
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -25,12 +28,33 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
     }
   }
 
+  // Adding a course first looks for matching standard courses (see CourseSuggestions).
   function addSubject(e) {
     e.preventDefault()
     if (!newSubject.trim()) return
+    setAdding(newSubject.trim())
+  }
+
+  function chooseCourse(suggestion) {
     run(async () => {
-      await api.createSubject(user.id, newSubject)
+      await api.addCourse(user.id, suggestion.course.id, suggestion.as_topic ? suggestion.topic : null)
+      setAdding('')
       setNewSubject('')
+    })
+  }
+
+  function keepCustom() {
+    run(async () => {
+      await api.createSubject(user.id, adding)
+      setAdding('')
+      setNewSubject('')
+    })
+  }
+
+  function linkCourse(suggestion) {
+    run(async () => {
+      await api.linkSubject(linking.id, suggestion.course.id)
+      setLinking(null)
     })
   }
 
@@ -75,11 +99,28 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
       {subjects.map((s) => (
         <section key={s.id} className="card">
           <div className="row">
-            <h3>{s.name}</h3>
+            <div className="row-start">
+              <h3>{s.name}</h3>
+              <VerifiedChip course={s.course} />
+              {s.course && s.course.name !== s.name && <span className="status">{s.course.name}</span>}
+              {!s.course && linking?.id !== s.id && (
+                <button className="link" onClick={() => setLinking(s)}>
+                  find a matching course
+                </button>
+              )}
+            </div>
             <button className="icon" title="Delete subject" onClick={() => removeSubject(s)}>
               ×
             </button>
           </div>
+          {linking?.id === s.id && (
+            <CourseSuggestions
+              query={s.name}
+              mode="link"
+              onChoose={linkCourse}
+              onCancel={() => setLinking(null)}
+            />
+          )}
 
           {s.topics.map((t) => {
             const p = byTopic[t.id]
@@ -115,6 +156,14 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
             )
           })}
 
+          {s.course && (
+            <SuggestedTopics
+              course={s.course}
+              have={s.topics}
+              onAdd={(name) => run(() => api.createTopic(s.id, name))}
+            />
+          )}
+
           <form className="row" onSubmit={(e) => addTopic(e, s.id)}>
             <input
               value={newTopics[s.id] || ''}
@@ -129,9 +178,42 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
       ))}
 
       <form className="card row" onSubmit={addSubject}>
-        <input value={newSubject} onChange={(e) => setNewSubject(e.target.value)} placeholder="New subject (e.g. Calculus I)" />
-        <button type="submit">Add subject</button>
+        <input
+          value={newSubject}
+          onChange={(e) => setNewSubject(e.target.value)}
+          placeholder="New course (e.g. Algebra I, Spanish, or just Addition)"
+          disabled={Boolean(adding)}
+        />
+        <button type="submit" disabled={Boolean(adding)}>
+          Add course
+        </button>
       </form>
+      {adding && (
+        <CourseSuggestions
+          key={adding}
+          query={adding}
+          onChoose={chooseCourse}
+          onKeep={keepCustom}
+          onCancel={() => setAdding('')}
+        />
+      )}
+    </div>
+  )
+}
+
+// The catalog's usual topics for a course that the student hasn't added yet, as one-click chips.
+function SuggestedTopics({ course, have, onAdd }) {
+  const names = new Set(have.map((t) => t.name.toLowerCase()))
+  const missing = course.topics.filter((t) => !names.has(t.toLowerCase()))
+  if (missing.length === 0) return null
+  return (
+    <div className="topic-chips">
+      <span className="status">Usual topics:</span>
+      {missing.map((t) => (
+        <button key={t} className="chip add" onClick={() => onAdd(t)}>
+          + {t}
+        </button>
+      ))}
     </div>
   )
 }

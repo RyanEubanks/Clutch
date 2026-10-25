@@ -39,6 +39,19 @@ CONTENTS
  1. OPEN ISSUES AND WATCH-OUTS
 ================================================================================
 
+[OPEN-08] What still isn't verified
+  Date:      Oct 25, 2026 (updated after adding the subject checkers)
+  Note:      Verified: Elementary Math, Pre-Algebra, Algebra I and II, Calculus I,
+             Geometry, Statistics, Physics. Partly: Chemistry, Spanish I, English,
+             U.S./World History, Geography, Civics, Social Studies. Not: Biology,
+             French, Programming, Economics, Psychology, custom courses (but any
+             course can be checked against the student's notes). Gaps even in
+             verified courses: concept questions without notes, word problems,
+             proofs, graphing, and calculus answers in chat. Spanish covers only
+             present-tense conjugations of 143 listed verbs. Not yet built: open
+             textbooks (same quote check as notes), programming (needs a sandbox).
+  Files:     backend/courses.py
+
 [OPEN-07] Arithmetic word problems still can't be checked
   Date:      Oct 25, 2026
   Note:      "If you have 12 apples and get 5 more, how many?" has no written-out
@@ -112,6 +125,36 @@ CONTENTS
 ================================================================================
  2. CAUGHT BY TESTS AND TEST RUNS
 ================================================================================
+
+[TEST-12] Quotes from notes failed on an apostrophe and a comma
+  Date:      Oct 25, 2026
+  Found by:  groundcheck dry run
+  Symptom:   "The nucleus stores the cells DNA, and controls..." wasn't found in
+             notes saying "the cell's DNA and controls...".
+  Fix:       Compare letters, digits and spaces only. A changed word (DNA -> RNA)
+             still fails, as it should.
+  Files:     backend/groundcheck.py
+
+[TEST-11] Fact-bank date tags matched the wrong topics
+  Date:      Oct 25, 2026
+  Found by:  questions_for() dry run
+  Symptom:   A "Civil War" topic could get World War questions (shared tag "war"),
+             tags like "us" matched any topic containing those letters, and
+             "State capitals" also pulled world capitals. Date questions read
+             "In what year the U.S. Civil War ended?".
+  Fix:       Specific tags only; state vs world capitals by topic words; each date
+             fact now stores its own question wording ("did the Civil War end").
+  Files:     backend/factbank.py
+
+[TEST-10] A bare "6" counted as a rounded 6.2
+  Date:      Oct 25, 2026
+  Found by:  statistics dry run (mean of 3, 5, 7, 7, 9)
+  Symptom:   Options "6.2" and "6" both matched, so the question was dropped as
+             having two right answers.
+  Cause:     Whole-number options got a +/-0.5 rounding tolerance.
+  Fix:       A whole number only counts as rounded when every option is a whole
+             number; next to decimals it means exactly that number.
+  Files:     backend/valuecheck.py
 
 [TEST-09] Blank-filling question failed on its trailing period and "\t"
   Date:      Oct 25, 2026
@@ -453,6 +496,32 @@ CONTENTS
  6. DESIGN DECISIONS
 ================================================================================
 
+[DECISION-08] Three ways to verify a course: calculate, look up, or quote the notes
+  Date:      Oct 25, 2026
+  1. Calculate: statistics/geometry (valuecheck.py), physics/chemistry
+     (sciencecheck.py). Physics uses a fixed list of standard laws; the model never
+     supplies a formula, since a wrong formula would make a wrong answer "verified".
+     Units are converted and checked by a small built-in SI table (no new dependency).
+  2. Look up: Spanish conjugations and English irregular forms (langcheck.py), and a
+     social studies fact bank (factbank.py) whose questions are generated from facts.
+     Words not in a table are never guessed.
+  3. Quote: with notes in Materials, the model must quote the sentence behind each
+     concept answer; groundcheck.py confirms the quote and that it supports the key.
+     Weaker (word overlap), so it's labeled "checked against your notes".
+  Verification levels: verified / partly verified / not verified, each listing what is
+  and isn't checked. Everything runs offline.
+
+[DECISION-07] Allow any course; verify only what we can check
+  Date:      Oct 25, 2026
+  Gemma isn't reliable for every subject (e.g. Spanish), but blocking courses would make
+  the app less useful. So any course is allowed, and courses are matched to a catalog of
+  standard courses (backend/courses.py). A catalog course is "Verified" only when the
+  math engine checks its answer types and it's tested; each lists exactly what is
+  checked, shown to the student. Suggestions combine Gemma (understands "times tables")
+  with a keyword match (instant, works offline); exact name/topic keyword hits rank first.
+  Typing a topic ("Addition") offers the course it belongs to, with that topic inside.
+  Schema v4 adds subjects.catalog_id (the first ALTER TABLE migration).
+
 [DECISION-06] Check math with SymPy and render from the checked expressions
   The model writes math quiz questions as SymPy tasks, and the question and
   options students see are generated from those same expressions, so what's
@@ -518,3 +587,8 @@ CONTENTS
   Oct 25  Chat answer checking ([MODEL-06]) + restoring 65 pass, including
           Ryan's overwritten code ([REVIEW-06])         Ryan's search, notes and
                                                         lecture tests
+  Oct 25  Course catalog + verification                93 pass; v3 -> v4 upgrade
+          ([DECISION-07])                               tested on a copy of the real
+                                                        database (all rows kept)
+  Oct 25  Subject checkers ([DECISION-08])              125 test functions pass after
+                                                        [TEST-10] to [TEST-12]

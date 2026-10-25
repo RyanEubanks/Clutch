@@ -12,6 +12,7 @@ Results are saved in eval_results/ as quiz-eval-<time>.md (read this) and .csv.
 """
 import argparse
 import csv
+import json
 import os
 import tempfile
 import time
@@ -24,18 +25,34 @@ os.environ.setdefault("DATABASE_PATH", str(Path(tempfile.mkdtemp()) / "eval.db")
 
 import app  # noqa: E402  (uses MODEL_NAME / MODEL_BASE_URL from .env, like the real app)
 
+# "course" is the catalog id (backend/courses.py): it decides which task forms the prompt
+# offers, the same way the app does.
 TOPICS = [
-    {"id": "chain-rule", "subject": "Calculus I", "topic": "Chain rule",
+    {"id": "chain-rule", "course": "calculus-1", "subject": "Calculus I", "topic": "Chain rule",
      "description": "Derivatives of compositions like (3x+1)^4 and sin(x^2)."},
-    {"id": "u-sub", "subject": "Calculus I", "topic": "Integration by substitution",
+    {"id": "u-sub", "course": "calculus-1", "subject": "Calculus I",
+     "topic": "Integration by substitution",
      "description": "Indefinite and definite integrals using u-substitution."},
-    {"id": "limits", "subject": "Calculus I", "topic": "Limits",
+    {"id": "limits", "course": "calculus-1", "subject": "Calculus I", "topic": "Limits",
      "description": "Limits by direct substitution, factoring 0/0 forms, and limits at infinity."},
-    {"id": "trig-derivs", "subject": "Calculus I", "topic": "Derivatives of trig functions",
+    {"id": "trig-derivs", "course": "calculus-1", "subject": "Calculus I",
+     "topic": "Derivatives of trig functions",
      "description": "Derivatives of sin, cos, tan, sec and their compositions."},
-    {"id": "quadratics", "subject": "Algebra", "topic": "Solving quadratic equations",
-     "description": "Factoring and the quadratic formula."},
-    {"id": "cells", "subject": "Biology", "topic": "Cell organelles",
+    {"id": "quadratics", "course": "algebra-1", "subject": "Algebra I",
+     "topic": "Solving quadratic equations", "description": "Factoring and the quadratic formula."},
+    {"id": "stats", "course": "statistics", "subject": "Statistics", "topic": "Mean, median and mode",
+     "description": "Averages and spread of small data sets."},
+    {"id": "geometry", "course": "geometry", "subject": "Geometry", "topic": "Area and perimeter",
+     "description": "Area and perimeter of rectangles, triangles and circles."},
+    {"id": "physics", "course": "physics", "subject": "Physics", "topic": "Energy",
+     "description": "Kinetic and potential energy, work and power."},
+    {"id": "chemistry", "course": "chemistry", "subject": "Chemistry", "topic": "Stoichiometry",
+     "description": "Molar mass, moles, and balancing equations."},
+    {"id": "spanish", "course": "spanish-1", "subject": "Spanish I", "topic": "Present tense",
+     "description": "Present-tense conjugation of common verbs."},
+    {"id": "english", "course": "english", "subject": "English Language Arts",
+     "topic": "Irregular verbs", "description": "Past tense and past participles of irregular verbs."},
+    {"id": "cells", "course": "biology", "subject": "Biology", "topic": "Cell organelles",
      "description": "What the nucleus, mitochondria, ribosomes and cell membrane do."},
 ]
 
@@ -43,7 +60,9 @@ OUT_DIR = Path(__file__).resolve().parent / "eval_results"
 
 
 def run_one(topic):
-    prompt = app.quiz_prompt(
+    prompt = app.build_quiz_prompt(
+        app.courses.families(topic.get("course")),
+        False,
         n=app.QUIZ_QUESTIONS + 2,
         subject=topic["subject"],
         topic=topic["topic"],
@@ -77,7 +96,8 @@ def describe(entry):
     if entry["kind"] == "reply":
         return [f"- **{status}**: {entry['error']}"]
     if entry["kind"] == "math":
-        head = f"- **{status}** math `{entry.get('op')}`: `{raw.get('expr')}`"
+        task = {k: v for k, v in raw.items() if k not in ("op", "options", "answer", "explanation")}
+        head = f"- **{status}** task `{entry.get('op')}`: `{json.dumps(task, ensure_ascii=False)}`"
         lines = [head]
         if entry["status"] == "dropped":
             lines.append(f"   - why: {entry['error']}")
@@ -125,7 +145,7 @@ def write_reports(runs, stamp):
           "## Summary", "",
           f"- Quizzes with enough usable questions ({app.QUIZ_QUESTIONS}) from ONE reply: "
           f"{full}/{len(runs)} (the app also retries once)",
-          f"- Math questions written: {math_total}",
+          f"- Checkable task questions written (math, science, language): {math_total}",
           f"  - checked, key was right: {statuses['math:checked']}",
           f"  - checked, **key was wrong and got fixed**: {statuses['math:corrected']}",
           f"  - dropped: {statuses['math:dropped']}",
@@ -133,7 +153,7 @@ def write_reports(runs, stamp):
           f"{statuses['concept:dropped']} dropped",
           f"- Replies that weren't usable JSON: {statuses['reply:bad_json']}", ""]
     if math_total:
-        md.append(f"Model's math answer key accuracy: "
+        md.append(f"Model's answer key accuracy on checkable questions: "
                   f"{statuses['math:checked']}/{checked} of checkable questions "
                   f"({100 * statuses['math:checked'] / max(1, checked):.0f}%). "
                   f"Students only ever see the fixed key.")
@@ -195,7 +215,7 @@ def main():
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     md_path, csv_path, statuses, math_total, checked, full = write_reports(runs, stamp)
     print()
-    print(f"Math questions: {math_total} | key right: {statuses['math:checked']} | "
+    print(f"Checkable task questions: {math_total} | key right: {statuses['math:checked']} | "
           f"key wrong, fixed: {statuses['math:corrected']} | dropped: {statuses['math:dropped']}")
     print(f"Concept (unchecked): {statuses['concept:unchecked']} | full quizzes from one reply: "
           f"{full}/{len(runs)}")

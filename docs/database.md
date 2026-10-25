@@ -9,7 +9,7 @@ Schema: `backend/schema.sql`. Data access: `backend/db.py`.
 | Table | What it holds |
 |---|---|
 | `users` | Students. Username-only sign-in for now (no passwords). |
-| `subjects` | A student's courses, e.g. "Calculus I". |
+| `subjects` | A student's courses, e.g. "Calculus I". `catalog_id` (v4) links one to a standard course in `courses.py`; NULL = custom course. |
 | `topics` | Units inside a subject, e.g. "Chain rule". Progress is tracked per topic. |
 | `conversations` | Study sessions. Optional `topic_id`; `ended_at` set once reviewed. |
 | `messages` | Every user/assistant turn in a session. |
@@ -66,6 +66,49 @@ characters (default 6000) because of Ollama's small default context window (see 
 - The browser sends `today` and `tz` (`Date.getTimezoneOffset()`), so days follow the
   student's clock; SQLite timestamps are UTC.
 
+## Course catalog and verification
+
+`backend/courses.py` lists standard courses (Elementary Math, Algebra I, Calculus I, Spanish I,
+Biology, ...) with their usual topics. Students can add any course; when they type one, the app
+suggests matching standard courses (`POST /api/courses/suggest`). Gemma reads the catalog and
+picks the best fits ("my times table homework" -> Elementary Math), and a keyword match runs
+alongside so suggestions still work if the model is slow or answers badly. If what they typed
+is a topic inside a course ("Addition"), choosing that course adds it as a topic there.
+
+Each catalog course has a verification level, shown to students as a chip, with lists of
+what is and isn't checked (`checks`, `not_checked`):
+
+- **✓ Verified**: the checkers cover the kinds of answers most of the course is made of.
+  Elementary Math, Pre-Algebra, Algebra I and II, Calculus I, Geometry, Statistics, Physics.
+- **◐ Partly verified**: some kinds of answers are checked. Chemistry, Spanish I, English,
+  U.S. History, World History, Geography, Civics & Government, Social Studies.
+- **Not verified**: Biology, French, Programming, Economics, Psychology, and custom courses.
+
+Any course's quiz questions can also be checked against the student's own notes.
+
+### How answers are checked
+
+| Checker | File | Covers | How |
+|---|---|---|---|
+| Math | `mathcheck.py` | derivatives, integrals, limits, equations, simplifying, arithmetic | SymPy computes the answer |
+| Numbers | `valuecheck.py` | statistics (mean ... normal probabilities), geometry (area, volume, Pythagoras, angles, distance) | computed; rounded options are fine ("78.54", "68%") |
+| Science | `sciencecheck.py` | physics (a fixed list of 16 standard laws, with units), chemistry (molar mass, moles, pH, balancing) | the model only picks the law and values, never the formula; units are converted and checked |
+| Language | `langcheck.py` | Spanish present-tense conjugations, English irregular verbs and plurals | tables; words not in the tables are left unchecked, never guessed |
+| Fact bank | `factbank.py` | state and world capitals, presidents 1-45, amendments, Congress and the branches, key dates | questions are generated from the facts, so they're right by construction |
+| Notes | `groundcheck.py` | any course with notes in Materials | the model must quote the sentence its answer comes from; the quote must be in the notes and support the keyed option |
+
+In every case the app writes the question text from what it checked, fixes a wrong key,
+and drops questions it can't verify. Quizzes use checked questions first; each question
+shows how it was checked. The quiz prompt only offers the question forms a course uses
+(`families` in courses.py), which keeps it short for the small model.
+
+To verify a new course: add a checker (or facts) for its answer types, add tests, run
+`eval_quiz.py` on its topics, then set `verification`, `checks`, `not_checked` and
+`families` in courses.py.
+
+Existing courses whose name exactly matches a standard course are linked on startup; others can
+be linked with "find a matching course" (`PATCH /api/subjects/<id>`), keeping their own name.
+
 ## API
 
 - `POST /api/users` `{username}` - sign in / create
@@ -75,6 +118,9 @@ characters (default 6000) because of Ollama's small default context window (see 
 - `POST /api/conversations/<id>/messages` `{content, homework?}` - saves both turns; scanned homework text is added to the prompt like in `/api/chat`
 - `POST /api/conversations/<id>/end` `{confidence?}` - review + progress update
 - `GET|POST /api/users/<uid>/documents`, `GET|DELETE /api/documents/<id>`
+- `GET /api/courses`, `POST /api/courses/suggest` `{query}` - catalog, and matches for what a student typed
+- `POST /api/users/<uid>/subjects` `{name}` (custom) or `{catalog_id, topic?}` (standard course, optional topic inside; reuses the course if the student already has it)
+- `PATCH /api/subjects/<id>` `{catalog_id or null}` - link a custom course to a standard one
 - `GET /api/users/<uid>/progress` - includes `quiz_unlocked` and `badge_earned_at` per topic
 - `POST /api/topics/<id>/quiz` - get the open quiz or write a new one (403 until unlocked)
 - `GET /api/quizzes/<id>`, `POST /api/quizzes/<id>/submit` `{answers: [0-3, ...]}` - grade + award badge

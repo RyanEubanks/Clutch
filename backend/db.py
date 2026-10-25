@@ -11,7 +11,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = BACKEND_DIR / "schema.sql"
 DEFAULT_DB_PATH = BACKEND_DIR / "user_data" / "clutch.db"
-SCHEMA_VERSION = 3  # 2: quizzes + badges, 3: events (both new tables only, created by schema.sql)
+SCHEMA_VERSION = 4  # 2: quizzes + badges, 3: events (new tables), 4: subjects.catalog_id
 
 # How much a new session review moves topic mastery (0-1). Higher = reacts faster.
 MASTERY_WEIGHT = 0.4
@@ -35,12 +35,17 @@ def init_db(conn):
     """Create tables if missing and run any pending migrations."""
     conn.executescript(SCHEMA_PATH.read_text())
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    # Migrations for changes schema.sql can't apply on its own (e.g. new columns):
-    # if version < 3:
-    #     conn.execute("ALTER TABLE topics ADD COLUMN ...")
+    # Migrations for changes schema.sql can't apply on its own (e.g. new columns).
+    # Each checks first, because a brand-new database already has the column.
+    if version < 4 and "catalog_id" not in _columns(conn, "subjects"):
+        conn.execute("ALTER TABLE subjects ADD COLUMN catalog_id TEXT")
     if version < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
+
+
+def _columns(conn, table):
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
 def _row(row):
@@ -69,10 +74,42 @@ def get_user(conn, user_id):
 
 # ---------- subjects & topics ----------
 
-def create_subject(conn, user_id, name):
-    cur = conn.execute("INSERT INTO subjects (user_id, name) VALUES (?, ?)", (user_id, name.strip()))
+def create_subject(conn, user_id, name, catalog_id=None):
+    cur = conn.execute(
+        "INSERT INTO subjects (user_id, name, catalog_id) VALUES (?, ?, ?)",
+        (user_id, name.strip(), catalog_id),
+    )
     conn.commit()
     return _row(conn.execute("SELECT * FROM subjects WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def link_catalog_names(conn, names_to_ids):
+    """Link custom subjects whose name exactly matches a catalog course ("elementary math")."""
+    rows = conn.execute("SELECT id, name FROM subjects WHERE catalog_id IS NULL").fetchall()
+    for row in rows:
+        course_id = names_to_ids.get(row["name"].strip().lower())
+        if course_id:
+            conn.execute("UPDATE subjects SET catalog_id = ? WHERE id = ?", (course_id, row["id"]))
+    conn.commit()
+
+
+def set_subject_catalog(conn, subject_id, catalog_id):
+    conn.execute("UPDATE subjects SET catalog_id = ? WHERE id = ?", (catalog_id, subject_id))
+    conn.commit()
+    return get_subject(conn, subject_id)
+
+
+def find_subject(conn, user_id, name):
+    return _row(conn.execute(
+        "SELECT * FROM subjects WHERE user_id = ? AND name = ?", (user_id, name.strip())
+    ).fetchone())
+
+
+def find_topic(conn, subject_id, name):
+    return _row(conn.execute(
+        "SELECT * FROM topics WHERE subject_id = ? AND lower(name) = lower(?)",
+        (subject_id, name.strip()),
+    ).fetchone())
 
 
 def get_subject(conn, subject_id):
@@ -109,7 +146,7 @@ def create_topic(conn, subject_id, name, description=None):
 
 def get_topic(conn, topic_id):
     return _row(conn.execute(
-        """SELECT t.*, s.name AS subject_name, s.user_id
+        """SELECT t.*, s.name AS subject_name, s.user_id, s.catalog_id
            FROM topics t JOIN subjects s ON s.id = t.subject_id WHERE t.id = ?""",
         (topic_id,),
     ).fetchone())
@@ -335,7 +372,7 @@ def get_review(conn, conversation_id):
 def progress_overview(conn, user_id):
     """Every topic the student has, with progress (zeros if never studied)."""
     return _rows(conn.execute(
-        """SELECT s.id AS subject_id, s.name AS subject_name,
+        """SELECT s.id AS subject_id, s.name AS subject_name, s.catalog_id,
                   t.id AS topic_id, t.name AS topic_name,
                   COALESCE(p.mastery, 0) AS mastery,
                   b.earned_at AS badge_earned_at,

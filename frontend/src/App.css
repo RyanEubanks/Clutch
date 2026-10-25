@@ -1916,3 +1916,144 @@ button.event-title .status {
     border-radius: 3px;
   }
 }
+
+/* ---------- course catalog: verified chips and suggestions ---------- */
+
+.row-start {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.chip.verified {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+}
+
+.chip.unverified {
+  background: #f6f4f1;
+  border: 1px solid #ddd6cc;
+  color: #7a6a5c;
+}
+
+button.chip.add {
+  background: white;
+  border: 1px dashed #93b4f5;
+  color: #2563eb;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+button.chip.add:hover {
+  background: #eef3ff;
+}
+
+.topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0.2rem;
+}
+
+.suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0.5rem 0 1rem;
+  padding: 0.75rem 1rem;
+  background: #fffdf8;
+  border: 1px solid #f3dfb0;
+  border-radius: 12px;
+}
+
+.suggestions > .status {
+  margin: 0;
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 0.8rem;
+  background: white;
+  border: 1px solid #dcdce0;
+  border-radius: 10px;
+}
+
+.suggestion.is-verified {
+  border-color: #bbf7d0;
+}
+
+.suggestion-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.suggestion-info p {
+  margin: 0.3rem 0 0;
+}
+
+.checks {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+  color: #15803d;
+}
+
+.small-note {
+  font-size: 0.8rem;
+}
+
+@media (max-width: 640px) {
+  .suggestion {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.chip.partial {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+.suggestion.is-partial {
+  border-color: #fde68a;
+}
+
+.source {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #86efac;
+  background: #f7fdf9;
+  border-radius: 0 8px 8px 0;
+  font-size: 0.9rem;
+  color: #14532d;
+}
+
+/* Half-filled dot for "Partly verified" (the ◐ character renders unreliably). */
+.half-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-right: 0.15rem;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+  vertical-align: -0.05rem;
+  box-sizing: border-box;
+}

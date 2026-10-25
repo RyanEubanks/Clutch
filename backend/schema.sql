@@ -13,10 +13,13 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- A course or area of study, e.g. "Calculus I". Owned by one student.
+-- catalog_id links the subject to a standard course in backend/courses.py (v4), which says
+-- whether the course is verified. NULL means a custom course the student made up.
 CREATE TABLE IF NOT EXISTS subjects (
     id         INTEGER PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
+    catalog_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (user_id, name)
 );

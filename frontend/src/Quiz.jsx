@@ -5,6 +5,16 @@ import { Badge, Hen } from './Mascot.jsx'
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
+// How a question's answer key was checked: [tag text, longer explanation on hover].
+const CHECKED = {
+  math: ['math-checked', 'Mother Hen checked this answer key with a math engine (SymPy).'],
+  science: ['calculator-checked', 'Checked with a calculator, including units, standard formulas and atomic weights.'],
+  spanish: ['conjugation-checked', "Checked against Clutch's Spanish conjugation tables."],
+  english: ['word-list checked', "Checked against Clutch's lists of irregular English words."],
+  facts: ['from the fact bank', "This question comes from Clutch's fact bank, so its answer is right."],
+  notes: ['checked against your notes', 'The answer was checked against a sentence in your own notes.'],
+}
+
 // A mastery quiz for one topic. Passing earns the topic's badge.
 export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
   const [quiz, setQuiz] = useState(null)
@@ -94,8 +104,8 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
         {quiz.questions.map((q, i) => (
           <li key={i} className="card question">
             {q.verified && (
-              <span className="checked" title="Mother Hen checked this answer key with a math engine (SymPy)">
-                ✓ math-checked
+              <span className="checked" title={CHECKED[q.checked_by]?.[1] ?? CHECKED.math[1]}>
+                ✓ {CHECKED[q.checked_by]?.[0] ?? CHECKED.math[0]}
               </span>
             )}
             <Markdown>{q.question}</Markdown>
@@ -125,7 +135,12 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
             {graded && q.key_set_by_hand && (
               <p className="status">This answer key was corrected by hand.</p>
             )}
-            {graded && q.explanation && (
+            {graded && q.source && (
+              <blockquote className="source">
+                From your notes: “{q.source}”
+              </blockquote>
+            )}
+            {graded && q.explanation && !(q.source && q.explanation.startsWith('From your notes')) && (
               <div className="explanation">
                 <Markdown>{q.explanation}</Markdown>
               </div>

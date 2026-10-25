@@ -17,6 +17,13 @@ export const api = {
   subjects: (userId) => request(`/users/${userId}/subjects`),
   createSubject: (userId, name) =>
     request(`/users/${userId}/subjects`, { method: 'POST', body: { name } }),
+  // A standard course from the catalog; topic (optional) is added inside it.
+  addCourse: (userId, catalogId, topic) =>
+    request(`/users/${userId}/subjects`, { method: 'POST', body: { catalog_id: catalogId, topic } }),
+  linkSubject: (id, catalogId) =>
+    request(`/subjects/${id}`, { method: 'PATCH', body: { catalog_id: catalogId } }),
+  courses: () => request('/courses'),
+  suggestCourses: (query) => request('/courses/suggest', { method: 'POST', body: { query } }),
   deleteSubject: (id) => request(`/subjects/${id}`, { method: 'DELETE' }),
   createTopic: (subjectId, name, description) =>
     request(`/subjects/${subjectId}/topics`, { method: 'POST', body: { name, description } }),
@@ -65,6 +72,9 @@ export const api = {
 
 export function topicOptions(subjects) {
   return subjects.flatMap((s) =>
-    s.topics.map((t) => ({ id: t.id, label: `${s.name} / ${t.name}` })),
+    s.topics.map((t) => ({
+      id: t.id,
+      label: `${s.name}${s.verification === 'verified' ? ' ✓' : s.verification === 'partial' ? ' ◐' : ''} / ${t.name}`,
+    })),
   )
 }
