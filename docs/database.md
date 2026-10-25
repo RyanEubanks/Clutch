@@ -51,6 +51,21 @@ characters (default 6000) because of Ollama's small default context window (see 
 - Passing awards the badge; failing allows a fresh quiz. Asking for a quiz while one is still open returns that one.
 - All three settings can be overridden in `.env`.
 
+### Course mastery and trophies (schema v7)
+
+- **Course mastery** is the average of the course's topic masteries, with topics not studied yet
+  counting as 0, so studying one topic hard doesn't make the whole course look mastered.
+  `db.course_progress()` returns it per course with `topics`, `studied`, `badges`, `min_topics`
+  and `trophy_earned_at`; `GET /api/users/<uid>/subjects` includes it as `course_progress`.
+- **Course trophy**: earned when every topic in the course has its badge and the course has at
+  least `COURSE_TROPHY_MIN_TOPICS` (3) topics. Stored in `course_badges` (with the topic count and
+  mastery at that moment) and kept if topics are added later. It's checked when a quiz passes
+  (`new_course_trophy` and `course` in the submit response), when a topic is deleted, and by
+  `regrade_quizzes.py --apply`. `GET /api/users/<uid>/trophies` lists them.
+- The trophy art (crown, laurels, sunburst) is `course-trophy.svg` / `course-trophy-locked.svg`,
+  made by `generate.py course-trophy course-trophy-locked`. Passing a name writes only that asset,
+  so the other SVGs keep their content credentials.
+
 ## Profiles, sign-in and the demo
 
 - The sign-in screen lists every profile on the computer (`GET /api/profiles`: names only).

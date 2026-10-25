@@ -1201,7 +1201,10 @@ def create_app(db_path=None, demo_account=True):
 
     @app.get("/api/users/<int:user_id>/subjects")
     def list_subjects(user_id):
-        return jsonify([with_course(s) for s in db.list_subjects_with_topics(get_db(), user_id)])
+        conn = get_db()
+        courses_done = db.course_progress(conn, user_id)
+        return jsonify([with_course(s) | {"course_progress": courses_done.get(s["id"])}
+                        for s in db.list_subjects_with_topics(conn, user_id)])
 
     @app.post("/api/users/<int:user_id>/subjects")
     def create_subject(user_id):
@@ -1305,7 +1308,11 @@ def create_app(db_path=None, demo_account=True):
 
     @app.delete("/api/topics/<int:topic_id>")
     def delete_topic(topic_id):
-        db.delete_topic(get_db(), topic_id)
+        conn = get_db()
+        topic = db.get_topic(conn, topic_id)
+        db.delete_topic(conn, topic_id)
+        if topic:  # removing the last topic without a badge can complete the course
+            db.award_course_trophy(conn, topic["user_id"], topic["subject_id"])
         return "", 204
 
     # ---------- conversations ----------
@@ -1674,16 +1681,27 @@ def create_app(db_path=None, demo_account=True):
             return jsonify(error=f"answers must be {quiz['total']} option indexes (0-3)"), 400
 
         graded, new_badge = db.submit_quiz(conn, quiz_id, answers, QUIZ_PASS_FRACTION)
+        topic = db.get_topic(conn, graded["topic_id"])
+        user_id = graded["user_id"]
+        new_trophy = bool(graded["passed"]) and db.award_course_trophy(conn, user_id, topic["subject_id"])
         return jsonify(
             quiz=graded,
             new_badge=new_badge,
-            badge=db.get_badge(conn, graded["user_id"], graded["topic_id"]),
+            badge=db.get_badge(conn, user_id, graded["topic_id"]),
             needed=math.ceil(QUIZ_PASS_FRACTION * graded["total"] - 1e-9),
+            # The course this topic is in: mastery, badges so far, and its trophy
+            course={"subject_id": topic["subject_id"], "name": topic["subject_name"],
+                    **db.course_progress(conn, user_id)[topic["subject_id"]]},
+            new_course_trophy=new_trophy,
         )
 
     @app.get("/api/users/<int:user_id>/badges")
     def list_badges(user_id):
         return jsonify(db.list_badges(get_db(), user_id))
+
+    @app.get("/api/users/<int:user_id>/trophies")
+    def list_trophies(user_id):
+        return jsonify(db.list_course_trophies(get_db(), user_id))
 
     @app.cli.command("reset-password")
     @click.argument("username")

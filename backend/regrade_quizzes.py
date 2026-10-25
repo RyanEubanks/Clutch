@@ -185,6 +185,11 @@ def main():
                     "INSERT OR IGNORE INTO badges (user_id, topic_id, quiz_id, earned_at) VALUES (?, ?, ?, ?)",
                     (quiz["user_id"], quiz["topic_id"], quiz["id"], quiz["submitted_at"]))
     print(f"Saved changes to {len(changes)} quiz(zes).")
+    # A new badge can complete a course
+    for quiz, *_rest, award in changes:
+        topic = db.get_topic(conn, quiz["topic_id"]) if award else None
+        if topic and db.award_course_trophy(conn, quiz["user_id"], topic["subject_id"]):
+            print(f"   -> {topic['subject_name']} earns its course trophy")
 
 
 if __name__ == "__main__":

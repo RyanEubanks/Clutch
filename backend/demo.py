@@ -175,7 +175,8 @@ def reset_demo(conn, user_id):
     if not conn.execute("SELECT is_demo FROM users WHERE id = ?", (user_id,)).fetchone()[0]:
         raise ValueError("reset_demo only runs on the demo profile")
     with conn:
-        for table in ("events", "documents", "conversations", "quizzes", "badges", "topic_progress", "subjects"):
+        for table in ("events", "documents", "conversations", "quizzes", "badges", "course_badges",
+                      "topic_progress", "subjects"):
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         _build(conn, user_id)
 

@@ -1,5 +1,7 @@
 import badge from './assets/mascot/badge.svg'
 import badgeLocked from './assets/mascot/badge-locked.svg'
+import courseTrophy from './assets/mascot/course-trophy.svg'
+import courseTrophyLocked from './assets/mascot/course-trophy-locked.svg'
 import egg0 from './assets/mascot/egg-0.svg'
 import egg1 from './assets/mascot/egg-1.svg'
 import egg2 from './assets/mascot/egg-2.svg'
@@ -55,6 +57,22 @@ export function Egg({ mastery = 0, studied = false, size = 44 }) {
 export function Badge({ earned = false, size = 40, title }) {
   const label = title || (earned ? 'Badge earned' : 'Badge not earned yet')
   return <img src={earned ? badge : badgeLocked} width={size} height={size} alt={label} title={label} className="badge" />
+}
+
+// A course trophy: earned once every topic in the course has its badge. Bigger and
+// fancier than a topic badge (crown, laurels, sunburst); grey until then.
+export function CourseTrophy({ earned = false, size = 64, title, celebrate = false }) {
+  const label = title || (earned ? 'Course trophy earned' : 'Course trophy not earned yet')
+  return (
+    <img
+      src={earned ? courseTrophy : courseTrophyLocked}
+      width={size}
+      height={Math.round((size * 250) / 260)}
+      alt={label}
+      title={label}
+      className={`trophy ${earned ? 'earned' : ''} ${celebrate ? 'celebrate' : ''}`}
+    />
+  )
 }
 
 export function Logo({ height = 56 }) {

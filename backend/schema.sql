@@ -129,6 +129,19 @@ CREATE TABLE IF NOT EXISTS badges (
     PRIMARY KEY (user_id, topic_id)
 );
 
+-- ---------- v7: course trophies ----------
+
+-- One trophy per student per course, earned once every topic in the course has its badge
+-- (and the course has at least COURSE_TROPHY_MIN_TOPICS topics). Kept if topics are added later.
+CREATE TABLE IF NOT EXISTS course_badges (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    topics     INTEGER NOT NULL,     -- how many topics the course had when it was earned
+    mastery    REAL NOT NULL,        -- course mastery at that moment
+    earned_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, subject_id)
+);
+
 -- ---------- v3: planner (calendar + spaced repetition) ----------
 
 -- A date on the student's calendar. date/time are the student's local date and time

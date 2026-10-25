@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { CourseSuggestions, VerifiedChip } from './Courses.jsx'
 import Markdown from './Markdown.jsx'
-import { Badge, Egg } from './Mascot.jsx'
+import { Badge, CourseTrophy, Egg } from './Mascot.jsx'
 import Meter from './Meter.jsx'
 
 export default function ProgressView({ user, subjects, onSubjectsChanged, onStudy, onTakeQuiz }) {
@@ -76,12 +76,19 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
   }
 
   const badges = progress.filter((p) => p.badge_earned_at)
+  const trophies = subjects.filter((s) => s.course_progress?.trophy_earned_at)
 
   return (
     <div className="page">
       <h2>Progress</h2>
-      {badges.length > 0 && (
+      {(badges.length > 0 || trophies.length > 0) && (
         <div className="badge-shelf">
+          {trophies.map((s) => (
+            <figure key={`course-${s.id}`} className="trophy-figure">
+              <CourseTrophy earned size={76} title={`${s.name} course trophy`} />
+              <figcaption>{s.name}</figcaption>
+            </figure>
+          ))}
           {badges.map((b) => (
             <figure key={b.topic_id}>
               <Badge earned size={52} title={`${b.topic_name} badge`} />
@@ -114,6 +121,7 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
               ×
             </button>
           </div>
+          {s.course_progress && s.topics.length > 0 && <CourseMastery name={s.name} progress={s.course_progress} />}
           {s.course?.textbook_import?.available?.length > 0 && (
             <TextbookOffer course={s.course} onImported={onSubjectsChanged} />
           )}
@@ -205,6 +213,33 @@ export default function ProgressView({ user, subjects, onSubjectsChanged, onStud
           onCancel={() => setAdding('')}
         />
       )}
+    </div>
+  )
+}
+
+// Course mastery: the average over all its topics (unstudied ones count as 0), plus the
+// course trophy, which takes every topic's badge (and at least min_topics topics).
+function CourseMastery({ name, progress }) {
+  const { topics, badges, mastery, min_topics: minTopics, trophy_earned_at: earnedAt } = progress
+  let hint
+  if (earnedAt) hint = `Course mastered on ${new Date(earnedAt + 'Z').toLocaleDateString()}!`
+  else if (topics < minTopics)
+    hint = `Add ${minTopics - topics} more topic${minTopics - topics === 1 ? '' : 's'} and earn every badge to win the trophy.`
+  else if (badges === topics) hint = 'Every badge earned!'
+  else hint = `${topics - badges} more badge${topics - badges === 1 ? '' : 's'} to win the ${name} trophy.`
+  return (
+    <div className={`course-mastery ${earnedAt ? 'earned' : ''}`}>
+      <CourseTrophy
+        earned={Boolean(earnedAt)}
+        size={earnedAt ? 60 : 48}
+        title={earnedAt ? `${name} course trophy` : 'Earn every topic badge to win this trophy'}
+      />
+      <div className="course-mastery-info">
+        <Meter label="Course mastery" value={mastery} className="course" />
+        <span className="status">
+          {badges} of {topics} topic badge{topics === 1 ? '' : 's'} · {hint}
+        </span>
+      </div>
     </div>
   )
 }

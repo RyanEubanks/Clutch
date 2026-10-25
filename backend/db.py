@@ -13,10 +13,14 @@ SCHEMA_PATH = BACKEND_DIR / "schema.sql"
 DEFAULT_DB_PATH = BACKEND_DIR / "user_data" / "clutch.db"
 # 2: quizzes + badges, 3: events (new tables), 4: subjects.catalog_id on one branch and
 # users.password_hash + is_demo on another, 5: users.recovery_hash, 6: both branches merged
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7  # v7: course_badges (a new table, so no migration block)
 
 # How much a new session review moves topic mastery (0-1). Higher = reacts faster.
 MASTERY_WEIGHT = 0.4
+
+# A course trophy needs every topic's badge, and at least this many topics (so a course
+# with one easy topic doesn't count as mastered).
+COURSE_TROPHY_MIN_TOPICS = 3
 
 
 def db_path():
@@ -649,6 +653,65 @@ def open_quiz(conn, user_id, topic_id):
         (user_id, topic_id),
     ).fetchone()
     return get_quiz(conn, row["id"]) if row else None
+
+
+def course_progress(conn, user_id):
+    """{subject_id: course progress} for each of the student's courses.
+
+    mastery: the average of its topics' mastery, where topics not studied yet count as 0,
+    so studying one topic hard doesn't make the whole course look mastered.
+    """
+    rows = conn.execute(
+        """SELECT s.id AS subject_id, COUNT(t.id) AS topics,
+                  COALESCE(SUM(COALESCE(p.mastery, 0)), 0) AS mastery_sum,
+                  COUNT(b.topic_id) AS badges,
+                  SUM(CASE WHEN p.sessions_count > 0 THEN 1 ELSE 0 END) AS studied,
+                  cb.earned_at AS trophy_earned_at
+           FROM subjects s
+           LEFT JOIN topics t ON t.subject_id = s.id
+           LEFT JOIN topic_progress p ON p.topic_id = t.id AND p.user_id = s.user_id
+           LEFT JOIN badges b ON b.topic_id = t.id AND b.user_id = s.user_id
+           LEFT JOIN course_badges cb ON cb.subject_id = s.id AND cb.user_id = s.user_id
+           WHERE s.user_id = ?
+           GROUP BY s.id""",
+        (user_id,),
+    )
+    out = {}
+    for r in rows:
+        topics = r["topics"]
+        out[r["subject_id"]] = {
+            "topics": topics,
+            "studied": r["studied"] or 0,
+            "badges": r["badges"],
+            "mastery": r["mastery_sum"] / topics if topics else 0.0,
+            "min_topics": COURSE_TROPHY_MIN_TOPICS,
+            "trophy_earned_at": r["trophy_earned_at"],
+        }
+    return out
+
+
+def award_course_trophy(conn, user_id, subject_id):
+    """Give the course trophy if every topic has its badge (and there are enough topics).
+    Returns True if it was just earned."""
+    p = course_progress(conn, user_id).get(subject_id)
+    if (not p or p["trophy_earned_at"] or p["topics"] < COURSE_TROPHY_MIN_TOPICS
+            or p["badges"] < p["topics"]):
+        return False
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO course_badges (user_id, subject_id, topics, mastery) VALUES (?, ?, ?, ?)",
+        (user_id, subject_id, p["topics"], p["mastery"]),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def list_course_trophies(conn, user_id):
+    return _rows(conn.execute(
+        """SELECT cb.*, s.name AS subject_name, s.catalog_id FROM course_badges cb
+           JOIN subjects s ON s.id = cb.subject_id
+           WHERE cb.user_id = ? ORDER BY cb.earned_at DESC""",
+        (user_id,),
+    ))
 
 
 def get_badge(conn, user_id, topic_id):

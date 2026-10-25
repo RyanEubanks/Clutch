@@ -548,6 +548,22 @@ CONTENTS
  6. DESIGN DECISIONS
 ================================================================================
 
+[DECISION-11] Course mastery and course trophies
+  Date:      Oct 25, 2026
+  Mastery:   The average over all of a course's topics, unstudied ones as 0. Simple
+             and honest: you can't master Biology by studying only Mitosis.
+  Trophy:    Every topic's badge, with at least 3 topics (a 1-topic course would make
+             the trophy trivial). Saved when earned and kept if topics are added
+             later, like badges are kept after a regrade.
+  Art:       A gold cup with a crown, laurels and a sunburst, so it reads as a step
+             up from the topic rosette even at 36 px. Added to generate.py, which can
+             now write just the named assets (rewriting all of them strips their
+             content credentials, see [TEST-04]).
+  Checked:   Upgrade v6 -> v7 run on a copy of the real database: integrity ok, all
+             rows kept.
+  Files:     backend/db.py, backend/schema.sql, backend/app.py, frontend/src/Progress.jsx,
+             frontend/src/Quiz.jsx, frontend/src/Mascot.jsx
+
 [DECISION-10] Offer textbook imports in the app
   Date:      Oct 25, 2026
   Why:       Students (and the demo) shouldn't need a terminal to get a course's book.
@@ -677,3 +693,6 @@ CONTENTS
                                                         imported; 12/12 chapter test
   Oct 25  In-app textbook import ([DECISION-10])        147 pass; real Psychology 2e
                                                         imported from the app in 3 s
+  Oct 25  Course mastery + trophies ([DECISION-11])     157 pass; v6 -> v7 upgrade
+                                                        tested on a copy of the real
+                                                        database (all rows kept)

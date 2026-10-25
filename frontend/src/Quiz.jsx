@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import Markdown from './Markdown.jsx'
-import { Badge, Hen } from './Mascot.jsx'
+import { Badge, CourseTrophy, Hen } from './Mascot.jsx'
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
@@ -47,7 +47,7 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
       const r = await api.submitQuiz(quiz.id, answers)
       setResult(r)
       setQuiz(r.quiz)
-      if (r.new_badge) onBadge()
+      if (r.new_badge || r.new_course_trophy) onBadge()
     } catch (e) {
       setError(e.message)
     } finally {
@@ -170,7 +170,23 @@ export default function Quiz({ topicId, onBack, onStudy, onBadge, onRetry }) {
 }
 
 function ResultBanner({ result, onRetry, onStudy }) {
-  const { quiz, needed, badge } = result
+  const { quiz, needed, badge, course } = result
+  if (result.new_course_trophy) {
+    return (
+      <div className="result trophy-result">
+        <CourseTrophy earned celebrate size={132} />
+        <div>
+          <p className="trophy-kicker">Course mastered!</p>
+          <h3>You won the {course.name} trophy!</h3>
+          <p>
+            {quiz.score}/{quiz.total} on {quiz.topic_name}, and that was the last badge: all {course.topics}{' '}
+            topics are mastered. Mother Hen is so proud she could lay an egg.
+          </p>
+        </div>
+        <Hen pose="happy" size={96} />
+      </div>
+    )
+  }
   if (quiz.passed) {
     return (
       <div className="result passed">
@@ -182,6 +198,14 @@ function ResultBanner({ result, onRetry, onStudy }) {
           <p>
             {quiz.score}/{quiz.total} correct. Egg-cellent work. You hatched this one yourself.
           </p>
+          {course && !course.trophy_earned_at && (
+            <p className="status">
+              {course.name}: {course.badges} of {course.topics} topic badges
+              {course.topics >= course.min_topics
+                ? ` · ${course.topics - course.badges} more for the course trophy`
+                : ` · the course trophy needs at least ${course.min_topics} topics`}
+            </p>
+          )}
         </div>
         <Hen pose="happy" size={96} />
       </div>

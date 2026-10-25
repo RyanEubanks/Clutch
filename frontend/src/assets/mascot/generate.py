@@ -203,6 +203,94 @@ locked_body = (ribbons(GREY, GREY_DK)
                + f'<text x="110" y="112" text-anchor="middle" font-family="Nunito, ui-rounded, system-ui, sans-serif" font-size="40" font-weight="800" fill="{INK}" opacity=".55">?</text>')
 assets["badge-locked"] = svg("0 0 220 220", f'<g opacity=".9">{locked_body}</g>', "Badge not earned yet")
 
-for name, text in assets.items():
-    (OUT / f"{name}.svg").write_text(text)
-print(sorted(assets))
+# ---------- course trophy (earned once every topic in a course has its badge) ----------
+LEAF = "#7CC46A"; LEAF_DK = "#4F9A44"; SUN = "#FFE7A3"
+
+def sunburst(cx, cy, r, n, color):
+    rays = []
+    for i in range(n):
+        a1 = 2 * _m.pi * i / n; a2 = a1 + _m.pi / n
+        rays.append(f'<polygon points="{cx},{cy} {cx + r * _m.cos(a1):.1f},{cy + r * _m.sin(a1):.1f} '
+                    f'{cx + r * _m.cos(a2):.1f},{cy + r * _m.sin(a2):.1f}" fill="{color}"/>')
+    return "".join(rays)
+
+def laurel(cx, cy, r, side, fill, dark):
+    """A branch of leaves curving up one side (side=-1 left, 1 right)."""
+    out = []
+    path = []
+    for k in range(9):
+        deg = 112 + k * 14  # from the bottom up the side
+        a = _m.radians(deg if side < 0 else 180 - deg)
+        x, y = cx + r * _m.cos(a), cy + r * _m.sin(a)
+        path.append(f"{x:.1f} {y:.1f}")
+        tilt = _m.degrees(a) + (90 if side < 0 else -90) + 35 * side
+        for off in (-1, 1):
+            rot = tilt + 38 * off
+            out.append(f'<ellipse cx="{x:.1f}" cy="{y:.1f}" rx="13" ry="6" transform="rotate({rot:.0f} {x:.1f} {y:.1f}) translate({8 * off * side} 0)" '
+                       f'fill="{fill}" stroke="{INK}" stroke-width="3"/>')
+    stem = f'<path d="M{" L".join(path)}" fill="none" stroke="{dark}" stroke-width="4" stroke-linecap="round"/>'
+    return stem + "".join(out)
+
+def crown(cx, y, w, fill):
+    h = w * 0.55
+    pts = [(-w/2, h), (-w/2, h*.25), (-w/4, h*.6), (0, 0), (w/4, h*.6), (w/2, h*.25), (w/2, h)]
+    poly = " ".join(f"{cx + px:.1f},{y + py:.1f}" for px, py in pts)
+    jewels = "".join(f'<circle cx="{cx + px:.1f}" cy="{y + py - 3:.1f}" r="4" fill="{COMB}" stroke="{INK}" stroke-width="2.5"/>'
+                     for px, py in pts[1:6:2] + pts[3:4])
+    return (f'<polygon points="{poly}" fill="{fill}" stroke="{INK}" stroke-width="5" stroke-linejoin="round"/>'
+            + f'<rect x="{cx - w/2:.1f}" y="{y + h - 8:.1f}" width="{w}" height="10" rx="3" fill="{GOLD_DK}" stroke="{INK}" stroke-width="4"/>'
+            + jewels)
+
+CUP = "M78 70 H182 C182 128 164 156 144 164 L144 178 H116 L116 164 C96 156 78 128 78 70 Z"
+CUP_SHINE = "M94 84 C94 112 102 132 114 146"
+TROPHY_EGG = "M130 92 C 142 92 149 110 149 119 C 149 130 141 137 130 137 C 119 137 111 130 111 119 C 111 110 118 92 130 92 Z"
+
+def trophy(gold, gold_dk, leaf, leaf_dk, egg_fill, shine=True, sun=True, extras=True, locked=False):
+    handle = lambda d: (f'<path d="{d}" fill="none" stroke="{INK}" stroke-width="16" stroke-linecap="round"/>'
+                        f'<path d="{d}" fill="none" stroke="{gold}" stroke-width="7" stroke-linecap="round"/>')
+    dash = ' stroke-dasharray="10 7"' if locked else ""
+    body = ""
+    if sun:
+        body += f'<g opacity=".8">{sunburst(130, 118, 128, 18, SUN)}</g>'
+    body += laurel(130, 128, 100, -1, leaf, leaf_dk) + laurel(130, 128, 100, 1, leaf, leaf_dk)
+    body += handle("M84 86 C50 84 48 132 96 140") + handle("M176 86 C210 84 212 132 164 140")
+    body += f'<path d="{CUP}" fill="{gold}" stroke="{INK}" stroke-width="6" stroke-linejoin="round"/>'
+    body += f'<rect x="72" y="62" width="116" height="16" rx="6" fill="{gold_dk}" stroke="{INK}" stroke-width="5"/>'
+    if shine:
+        body += f'<path d="{CUP_SHINE}" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".8"/>'
+    body += f'<circle cx="130" cy="114" r="30" fill="{CREAM if not locked else "#F6F2EC"}" stroke="{INK}" stroke-width="4"/>'
+    body += f'<path d="{TROPHY_EGG}" fill="{egg_fill}" stroke="{INK}" stroke-width="4"{dash}/>'
+    if locked:
+        body += (f'<text x="130" y="128" text-anchor="middle" font-family="Nunito, ui-rounded, system-ui, sans-serif" '
+                 f'font-size="30" font-weight="800" fill="{INK}" opacity=".55">?</text>')
+    else:
+        body += f'<path d="M121 117 L128 124 L140 110" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>'
+    body += f'<ellipse cx="130" cy="182" rx="22" ry="8" fill="{gold_dk}" stroke="{INK}" stroke-width="5"/>'
+    body += f'<rect x="96" y="188" width="68" height="18" rx="4" fill="{gold_dk}" stroke="{INK}" stroke-width="5"/>'
+    body += f'<rect x="80" y="204" width="100" height="30" rx="6" fill="{COMB if not locked else GREY_DK}" stroke="{INK}" stroke-width="5"/>'
+    body += f'<rect x="98" y="212" width="64" height="14" rx="3" fill="{CREAM if not locked else "#F6F2EC"}" stroke="{INK}" stroke-width="3"/>'
+    for x in (113, 130, 147):  # three little stars on the plate
+        body += sparkle(x, 219, .38, gold_dk if not locked else GREY_DK)
+    body += crown(130, 22, 54, gold) if not locked else ""
+    if extras:
+        body += sparkle(222, 46, .9, "#fff").replace('fill="#fff"', f'fill="{gold}" stroke="{INK}" stroke-width="2.5"')
+        body += sparkle(36, 60, .7, gold) + sparkle(228, 176, .55, gold) + sparkle(30, 196, .5, "#fff").replace('fill="#fff"', f'fill="{gold}" stroke="{INK}" stroke-width="2"')
+    return body
+
+assets["course-trophy"] = svg("0 0 260 250", trophy(GOLD, GOLD_DK, LEAF, LEAF_DK, GOLD), "Course trophy")
+assets["course-trophy-locked"] = svg(
+    "0 0 260 250",
+    f'<g opacity=".9">{trophy(GREY, GREY_DK, GREY, GREY_DK, GREY, shine=False, sun=False, extras=False, locked=True)}</g>',
+    "Course trophy not earned yet")
+
+# python generate.py                 -> writes every SVG
+# python generate.py course-trophy   -> writes just the named ones (the others keep their
+#                                       content credentials, which rewriting would strip)
+import sys as _sys
+wanted = _sys.argv[1:] or list(assets)
+unknown = [n for n in wanted if n not in assets]
+if unknown:
+    _sys.exit(f"unknown asset(s): {', '.join(unknown)}; choose from {', '.join(sorted(assets))}")
+for name in wanted:
+    (OUT / f"{name}.svg").write_text(assets[name])
+print(sorted(wanted))

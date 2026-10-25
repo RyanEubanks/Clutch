@@ -658,6 +658,99 @@ button.tab.active {
   color: #5b3a29;
 }
 
+/* ---------- course mastery and trophies ---------- */
+
+.badge-shelf figure.trophy-figure {
+  width: 96px;
+  font-weight: 700;
+}
+
+.trophy.earned {
+  filter: drop-shadow(0 2px 6px rgba(240, 168, 30, 0.45));
+}
+
+.trophy.celebrate {
+  animation: trophy-pop 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both, trophy-glow 2.4s ease-in-out 0.7s infinite;
+}
+
+@keyframes trophy-pop {
+  from {
+    transform: scale(0.3) rotate(-12deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+@keyframes trophy-glow {
+  50% {
+    filter: drop-shadow(0 0 14px rgba(255, 200, 61, 0.9));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trophy.celebrate {
+    animation: none;
+  }
+}
+
+.course-mastery {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: #fffbf0;
+  border: 1px solid #f3dfb0;
+  border-radius: 10px;
+}
+
+.course-mastery.earned {
+  background: linear-gradient(100deg, #fff4cc, #fffbf0 60%);
+  border-color: #f3c95e;
+}
+
+.course-mastery-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.meter.course .meter-fill {
+  background: linear-gradient(90deg, #ffd96a, #f0a81e);
+}
+
+.meter.course span {
+  font-weight: 700;
+  color: #5b3a29;
+}
+
+.result.trophy-result {
+  background: linear-gradient(120deg, #fff1bf, #fff8e6 55%, #f0fdf4);
+  border: 2px solid #f3c95e;
+  box-shadow: 0 6px 20px rgba(240, 168, 30, 0.25);
+}
+
+.trophy-kicker {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b7791f;
+}
+
+@media (max-width: 560px) {
+  .result.trophy-result {
+    flex-direction: column;
+    text-align: center;
+  }
+}
+
 .unlock {
   display: flex;
   align-items: center;
