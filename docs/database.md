@@ -18,6 +18,8 @@ Schema: `backend/schema.sql`. Data access: `backend/db.py`.
 | `topic_progress` | Running `mastery` (0-1), session/message counts, last gaps, per student per topic. |
 | `quizzes` | Mastery quizzes: questions with answers (hidden from the API until submitted), the student's answers, score, passed. |
 | `badges` | One per student per topic, earned by passing that topic's quiz. |
+| `events` | Calendar dates: `kind` exam/quiz/homework/other, title, local `date` (YYYY-MM-DD) and optional `time`, optional subject, notes, `done`. |
+| `event_topics` | The topics an exam or quiz covers. |
 
 Deleting a user/subject/topic cascades. Deleting a topic keeps its chats and docs but unlinks them.
 
@@ -49,6 +51,21 @@ characters (default 6000) because of Ollama's small default context window (see 
 - Passing awards the badge; failing allows a fresh quiz. Asking for a quiz while one is still open returns that one.
 - All three settings can be overridden in `.env`.
 
+## Planner (spaced repetition)
+
+`backend/planner.py`, pure functions behind `GET /api/users/<uid>/planner`:
+
+- After n reviews a topic comes back after `BASE_INTERVALS[n]` days (1, 2, 4, 7, 12, 20, 30),
+  scaled by `0.5 + mastery`, so weak topics return sooner and strong ones later.
+- If an upcoming exam or quiz covers the topic: no gap longer than a third of the time left,
+  always a review the day before, and in the last 3 days every topic under 85% mastery is daily.
+- Today's list is ranked by exam closeness, weakness and how overdue each topic is; each item
+  carries plain-language reasons. Exam readiness = average mastery of the topics it covers.
+- Metrics: streak (days with a student message, counting back from today or yesterday), the
+  last 28 days of activity, this week's sessions and quizzes, average mastery.
+- The browser sends `today` and `tz` (`Date.getTimezoneOffset()`), so days follow the
+  student's clock; SQLite timestamps are UTC.
+
 ## API
 
 - `POST /api/users` `{username}` - sign in / create
@@ -63,7 +80,11 @@ characters (default 6000) because of Ollama's small default context window (see 
 - `GET /api/quizzes/<id>`, `POST /api/quizzes/<id>/submit` `{answers: [0-3, ...]}` - grade + award badge
 - `GET /api/users/<uid>/badges`
 - `POST /api/chat` `{messages, homework?}` - stateless (nothing saved), used by eval_tutor.py and chat_cli.py
-- `POST /api/homework/read` `{images}`, `POST /api/homework/study-guide` `{homework}` - homework scanning (not stored)
+- `POST /api/homework/read` `{images, kind?}` (`homework` or `notes`), `POST /api/homework/study-guide` `{homework}` - scanning (not stored)
+- `GET /api/users/<uid>/documents?q=` - search titles and text; matches in the text come with a `snippet`
+- `POST /api/lecture/transcribe` `{audio}` (base64 WAV, under 30 s), `POST /api/lecture/notes` `{transcript}` - lecture recording
+- `GET|POST /api/users/<uid>/events` (`?from=&to=`), `PATCH|DELETE /api/events/<id>` - calendar; `topic_ids` for exams and quizzes
+- `GET /api/users/<uid>/planner?today=YYYY-MM-DD&tz=<minutes>` - `due`, `upcoming`, `tests` (readiness), `metrics`
 
 ## Changing the schema later
 

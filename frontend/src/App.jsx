@@ -5,6 +5,7 @@ import Chat from './Chat.jsx'
 import Homework from './Homework.jsx'
 import Materials from './Materials.jsx'
 import { Hen, Logo } from './Mascot.jsx'
+import Planner from './Planner.jsx'
 import Progress from './Progress.jsx'
 import Quiz from './Quiz.jsx'
 import { formatDuration } from './recorder'
@@ -14,6 +15,7 @@ const USER_KEY = 'clutch.user'
 
 const VIEWS = [
   ['chat', 'Study'],
+  ['planner', 'Planner'],
   ['homework', 'Homework'],
   ['materials', 'Materials'],
   ['progress', 'Progress'],
@@ -228,6 +230,14 @@ export default function App() {
             onStudy={(topicId) => newChat(topicId)}
             onRetry={() => openQuiz(quizTopic)}
             onBadge={refreshSubjects}
+          />
+        )}
+        {view === 'planner' && (
+          <Planner
+            user={user}
+            subjects={subjects}
+            onStudy={(topicId) => newChat(topicId)}
+            onTakeQuiz={openQuiz}
           />
         )}
         {view === 'progress' && (

@@ -48,6 +48,15 @@ export const api = {
 
   progress: (userId) => request(`/users/${userId}/progress`),
 
+  events: (userId, from, to) =>
+    request(`/users/${userId}/events?${new URLSearchParams({ from, to })}`),
+  createEvent: (userId, event) => request(`/users/${userId}/events`, { method: 'POST', body: event }),
+  updateEvent: (id, changes) => request(`/events/${id}`, { method: 'PATCH', body: changes }),
+  deleteEvent: (id) => request(`/events/${id}`, { method: 'DELETE' }),
+  // today and tz come from this browser so "today" and streaks follow the student's clock
+  planner: (userId, today, tz) =>
+    request(`/users/${userId}/planner?${new URLSearchParams({ today, tz })}`),
+
   startQuiz: (topicId) => request(`/topics/${topicId}/quiz`, { method: 'POST' }),
   quiz: (id) => request(`/quizzes/${id}`),
   submitQuiz: (id, answers) => request(`/quizzes/${id}/submit`, { method: 'POST', body: { answers } }),

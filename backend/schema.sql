@@ -120,3 +120,28 @@ CREATE TABLE IF NOT EXISTS badges (
     earned_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, topic_id)
 );
+
+-- ---------- v3: planner (calendar + spaced repetition) ----------
+
+-- A date on the student's calendar. date/time are the student's local date and time
+-- (YYYY-MM-DD, HH:MM), since an exam "on Friday" means Friday where the student is.
+CREATE TABLE IF NOT EXISTS events (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('exam', 'quiz', 'homework', 'other')),
+    title      TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    time       TEXT,
+    notes      TEXT,
+    done       INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),  -- e.g. homework handed in
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_events_user_date ON events(user_id, date);
+
+-- The topics an exam or quiz covers. Reviews of these topics are packed in before it.
+CREATE TABLE IF NOT EXISTS event_topics (
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    PRIMARY KEY (event_id, topic_id)
+);

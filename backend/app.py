@@ -6,12 +6,14 @@ import os
 import random
 import re
 import sqlite3
+from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from openai import OpenAI
 
 import db
+import planner
 
 try:
     import mathcheck  # SymPy answer checking for math quiz questions
@@ -887,6 +889,112 @@ def create_app(db_path=None):
             r["quiz_unlocked"] = quiz_unlocked(r)
             r["quiz_unlock_at"] = QUIZ_UNLOCK_MASTERY
         return jsonify(rows)
+
+    # ---------- planner: calendar events, spaced repetition, metrics ----------
+
+    def event_fields(data, user_id, partial=False):
+        """Validate event fields from a request body. Returns (fields, topic_ids, error)."""
+        conn = get_db()
+        fields = {}
+        if not partial or "kind" in data:
+            if data.get("kind") not in db.EVENT_KINDS:
+                return None, None, f"kind must be one of {', '.join(db.EVENT_KINDS)}"
+            fields["kind"] = data["kind"]
+        if not partial or "title" in data:
+            title = (data.get("title") or "").strip()
+            if not title:
+                return None, None, "title is required"
+            fields["title"] = title
+        if not partial or "date" in data:
+            try:
+                fields["date"] = date.fromisoformat(data.get("date") or "").isoformat()
+            except ValueError:
+                return None, None, "date must be YYYY-MM-DD"
+        if "time" in data:
+            t = data.get("time") or None
+            if t and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+                return None, None, "time must be HH:MM"
+            fields["time"] = t
+        if "notes" in data:
+            fields["notes"] = (data.get("notes") or "").strip() or None
+        if "done" in data:
+            fields["done"] = bool(data["done"])
+        if "subject_id" in data:
+            sid = data.get("subject_id")
+            if sid is not None:
+                subject = db.get_subject(conn, sid)
+                if not subject or subject["user_id"] != user_id:
+                    return None, None, "subject not found"
+            fields["subject_id"] = sid
+        topic_ids = None
+        if "topic_ids" in data:
+            topic_ids = []
+            for tid in data.get("topic_ids") or []:
+                topic = db.get_topic(conn, tid)
+                if not topic or topic["user_id"] != user_id:
+                    return None, None, "topic not found"
+                topic_ids.append(tid)
+        return fields, topic_ids, None
+
+    @app.get("/api/users/<int:user_id>/events")
+    def list_events(user_id):
+        """Optional ?from=YYYY-MM-DD&to=YYYY-MM-DD (inclusive)."""
+        return jsonify(db.list_events(get_db(), user_id, request.args.get("from"), request.args.get("to")))
+
+    @app.post("/api/users/<int:user_id>/events")
+    def create_event(user_id):
+        if not db.get_user(get_db(), user_id):
+            return not_found("User")
+        fields, topic_ids, error = event_fields(body(), user_id)
+        if error:
+            return jsonify(error=error), 400
+        return jsonify(db.create_event(get_db(), user_id, topic_ids=topic_ids or [], **fields)), 201
+
+    @app.patch("/api/events/<int:event_id>")
+    def update_event(event_id):
+        event = db.get_event(get_db(), event_id)
+        if not event:
+            return not_found("Event")
+        fields, topic_ids, error = event_fields(body(), event["user_id"], partial=True)
+        if error:
+            return jsonify(error=error), 400
+        return jsonify(db.update_event(get_db(), event_id, fields, topic_ids))
+
+    @app.delete("/api/events/<int:event_id>")
+    def delete_event(event_id):
+        db.delete_event(get_db(), event_id)
+        return "", 204
+
+    @app.get("/api/users/<int:user_id>/planner")
+    def study_planner(user_id):
+        """Today's reviews, exam readiness and study metrics.
+
+        ?today=YYYY-MM-DD and ?tz=<Date.getTimezoneOffset()> come from the browser, so "today"
+        and the streak follow the student's own clock rather than the server's (UTC) one.
+        """
+        try:
+            today = date.fromisoformat(request.args.get("today") or date.today().isoformat())
+            tz = int(request.args.get("tz") or 0)
+        except ValueError:
+            return jsonify(error="today must be YYYY-MM-DD and tz a number of minutes"), 400
+        conn = get_db()
+        topics = db.progress_overview(conn, user_id)
+        for t in topics:
+            t["quiz_unlocked"] = quiz_unlocked(t) and not t["badge_earned_at"]
+        events = db.list_events(conn, user_id, start=today.isoformat())
+        since = (datetime.combine(today, datetime.min.time())
+                 - timedelta(days=planner.ACTIVITY_DAYS + 1)).strftime("%Y-%m-%d %H:%M:%S")
+        plan = planner.schedule(topics, events, today, tz)
+        return jsonify(
+            today=today.isoformat(),
+            due=[p for p in plan if p["due_today"]],
+            upcoming=[p for p in plan if not p["due_today"]],
+            tests=planner.readiness(events, topics, today),
+            metrics=planner.metrics(
+                db.study_activity(conn, user_id, since), db.quizzes_since(conn, user_id, since),
+                topics, today, tz,
+            ),
+        )
 
     # ---------- quizzes & badges ----------
 

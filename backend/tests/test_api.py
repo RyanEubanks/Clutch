@@ -270,6 +270,62 @@ def test_lecture_notes_are_made_in_parts(client, model, monkeypatch):
     assert client.post("/api/lecture/notes", json={"transcript": "  "}).status_code == 400
 
 
+def test_events_crud_and_validation(client, model):
+    user, subject, topic = setup_topic(client)
+    url = f"/api/users/{user['id']}/events"
+    r = client.post(url, json={"kind": "exam", "title": " Midterm ", "date": "2026-11-12", "time": "09:30",
+                               "subject_id": subject["id"], "topic_ids": [topic["id"]], "notes": "Room 4"})
+    assert r.status_code == 201
+    exam = r.get_json()
+    assert exam["title"] == "Midterm" and exam["topic_ids"] == [topic["id"]]
+    assert exam["subject_name"] == "Calculus" and exam["done"] is False
+
+    hw = client.post(url, json={"kind": "homework", "title": "Set 4", "date": "2026-11-05"}).get_json()
+    assert [e["title"] for e in client.get(url).get_json()] == ["Set 4", "Midterm"]  # by date
+    assert [e["title"] for e in client.get(url, query_string={"from": "2026-11-06"}).get_json()] == ["Midterm"]
+
+    done = client.patch(f"/api/events/{hw['id']}", json={"done": True}).get_json()
+    assert done["done"] is True and done["title"] == "Set 4"
+    moved = client.patch(f"/api/events/{exam['id']}", json={"date": "2026-11-14", "topic_ids": []}).get_json()
+    assert moved["date"] == "2026-11-14" and moved["topic_ids"] == [] and moved["time"] == "09:30"
+
+    for bad in ({"kind": "party", "title": "x", "date": "2026-11-01"}, {"kind": "exam", "title": " ", "date": "2026-11-01"},
+                {"kind": "exam", "title": "x", "date": "11/01/2026"},
+                {"kind": "exam", "title": "x", "date": "2026-11-01", "time": "9am"},
+                {"kind": "exam", "title": "x", "date": "2026-11-01", "topic_ids": [9999]}):
+        assert client.post(url, json=bad).status_code == 400, bad
+
+    # Another student's topic can't be attached
+    other, _, other_topic = setup_topic(client, username="sam")
+    assert client.patch(f"/api/events/{exam['id']}", json={"topic_ids": [other_topic["id"]]}).status_code == 400
+
+    assert client.delete(f"/api/events/{hw['id']}").status_code == 204
+    assert client.patch(f"/api/events/{hw['id']}", json={"done": False}).status_code == 404
+
+
+def test_planner_endpoint(client, model):
+    user, _, topic = setup_topic(client)
+    convo = client.post(f"/api/users/{user['id']}/conversations", json={"topic_id": topic["id"]}).get_json()
+    client.post(f"/api/conversations/{convo['id']}/messages", json={"content": "help"})
+    client.post(f"/api/conversations/{convo['id']}/end", json={"confidence": 3})
+    today = __import__("datetime").date.today()
+    exam_day = (today + __import__("datetime").timedelta(days=5)).isoformat()
+    client.post(f"/api/users/{user['id']}/events",
+                json={"kind": "exam", "title": "Unit test", "date": exam_day, "topic_ids": [topic["id"]]})
+
+    r = client.get(f"/api/users/{user['id']}/planner", query_string={"today": today.isoformat(), "tz": 0})
+    data = r.get_json()
+    assert r.status_code == 200 and data["today"] == today.isoformat()
+    item = (data["due"] + data["upcoming"])[0]
+    assert item["topic_id"] == topic["id"] and item["test"]["title"] == "Unit test"
+    assert item["test"]["days_left"] == 5
+    mastery = client.get(f"/api/users/{user['id']}/progress").get_json()[0]["mastery"]
+    assert data["tests"][0]["readiness"] == round(mastery, 3) > 0
+    m = data["metrics"]
+    assert m["streak"] == 1 and m["studied_today"] and m["week"]["sessions"] == 1
+    assert client.get(f"/api/users/{user['id']}/planner", query_string={"today": "soon"}).status_code == 400
+
+
 def test_split_transcript_keeps_everything():
     text = "First paragraph. " * 30 + "\n\n" + "Short one.\n\n" + "x" * 250
     parts = app_module.split_transcript(text, 120)

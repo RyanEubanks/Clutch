@@ -11,7 +11,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 SCHEMA_PATH = BACKEND_DIR / "schema.sql"
 DEFAULT_DB_PATH = BACKEND_DIR / "user_data" / "clutch.db"
-SCHEMA_VERSION = 2  # 2: quizzes + badges (new tables only, created by schema.sql)
+SCHEMA_VERSION = 3  # 2: quizzes + badges, 3: events (both new tables only, created by schema.sql)
 
 # How much a new session review moves topic mastery (0-1). Higher = reacts faster.
 MASTERY_WEIGHT = 0.4
@@ -349,6 +349,106 @@ def progress_overview(conn, user_id):
            WHERE s.user_id = ?
            ORDER BY s.name, t.name""",
         (user_id,),
+    ))
+
+
+# ---------- calendar events ----------
+
+EVENT_KINDS = ("exam", "quiz", "homework", "other")
+EVENT_FIELDS = ("subject_id", "kind", "title", "date", "time", "notes", "done")
+
+
+def _with_topics(conn, events):
+    """Attach topic_ids to each event (the topics an exam or quiz covers)."""
+    for e in events:
+        e["topic_ids"] = [r[0] for r in conn.execute(
+            "SELECT topic_id FROM event_topics WHERE event_id = ? ORDER BY topic_id", (e["id"],)
+        )]
+        e["done"] = bool(e["done"])
+    return events
+
+
+def create_event(conn, user_id, kind, title, date, time=None, subject_id=None, notes=None,
+                 topic_ids=()):
+    cur = conn.execute(
+        """INSERT INTO events (user_id, subject_id, kind, title, date, time, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, subject_id, kind, title.strip(), date, time or None, notes or None),
+    )
+    set_event_topics(conn, cur.lastrowid, topic_ids)
+    conn.commit()
+    return get_event(conn, cur.lastrowid)
+
+
+def get_event(conn, event_id):
+    row = _row(conn.execute(
+        """SELECT e.*, s.name AS subject_name FROM events e
+           LEFT JOIN subjects s ON s.id = e.subject_id WHERE e.id = ?""",
+        (event_id,),
+    ).fetchone())
+    return _with_topics(conn, [row])[0] if row else None
+
+
+def list_events(conn, user_id, start=None, end=None):
+    """Events in date order, optionally only those with start <= date <= end."""
+    sql = """SELECT e.*, s.name AS subject_name FROM events e
+             LEFT JOIN subjects s ON s.id = e.subject_id WHERE e.user_id = ?"""
+    params = [user_id]
+    if start:
+        sql += " AND e.date >= ?"
+        params.append(start)
+    if end:
+        sql += " AND e.date <= ?"
+        params.append(end)
+    sql += " ORDER BY e.date, COALESCE(e.time, '99:99'), e.id"
+    return _with_topics(conn, _rows(conn.execute(sql, params)))
+
+
+def update_event(conn, event_id, fields, topic_ids=None):
+    sets = {k: v for k, v in fields.items() if k in EVENT_FIELDS}
+    if "done" in sets:
+        sets["done"] = 1 if sets["done"] else 0
+    if sets:
+        conn.execute(
+            f"UPDATE events SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
+            (*sets.values(), event_id),
+        )
+    if topic_ids is not None:
+        set_event_topics(conn, event_id, topic_ids)
+    conn.commit()
+    return get_event(conn, event_id)
+
+
+def set_event_topics(conn, event_id, topic_ids):
+    conn.execute("DELETE FROM event_topics WHERE event_id = ?", (event_id,))
+    conn.executemany(
+        "INSERT OR IGNORE INTO event_topics (event_id, topic_id) VALUES (?, ?)",
+        [(event_id, t) for t in topic_ids],
+    )
+
+
+def delete_event(conn, event_id):
+    conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    conn.commit()
+
+
+def study_activity(conn, user_id, since):
+    """UTC timestamps of the student's own messages since `since` (UTC 'YYYY-MM-DD HH:MM:SS'),
+    with the topic of each, for streaks and activity charts."""
+    return _rows(conn.execute(
+        """SELECT m.created_at, c.topic_id, m.conversation_id FROM messages m
+           JOIN conversations c ON c.id = m.conversation_id
+           WHERE c.user_id = ? AND m.role = 'user' AND m.created_at >= ?
+           ORDER BY m.created_at""",
+        (user_id, since),
+    ))
+
+
+def quizzes_since(conn, user_id, since):
+    return _rows(conn.execute(
+        """SELECT topic_id, passed, submitted_at FROM quizzes
+           WHERE user_id = ? AND submitted_at IS NOT NULL AND submitted_at >= ?""",
+        (user_id, since),
     ))
 
 
